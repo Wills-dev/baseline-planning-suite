@@ -1,53 +1,163 @@
 # Baseline Planning Suite
 
-A delivery-planning product composed of separate Shell, People, and Delivery applications. This branch establishes the repository foundation only: each app currently renders its name.
+Baseline Planning Suite is a delivery-planning application for managing people, project allocations, capacity, and delivery costs.
 
-## Current architecture
+The application is being developed as three independently built frontend applications: **Shell**, **People**, and **Delivery**.
+
+This repository currently contains the initial workspace and tooling foundation. Business functionality and micro-frontend integration will be introduced incrementally.
+
+## Repository Structure
 
 ```text
-apps/
-  shell/       # Product shell; future owner of navigation, currency, active user
-  people/      # Future owner of employee information and rate history
-  delivery/    # Future owner of projects, breakdown items, allocations, staffing
-packages/
-  domain/      # Empty TypeScript package for future pure business calculations
-  contracts/   # Empty TypeScript package for intentionally published public APIs
+baseline-planning-suite/
+├── apps/
+│   ├── shell/
+│   ├── people/
+│   └── delivery/
+│
+├── packages/
+│   ├── domain/
+│   └── contracts/
+│
+├── package.json
+├── tsconfig.base.json
+└── README.md
 ```
 
-npm workspaces keep one product in one repository while preserving explicit application boundaries. Each app has its own React entry point, Vite configuration, and independent build. Apps do not import one another. ESLint restricts cross-app imports and React/application imports in the shared packages. The domain package has no React dependency; contracts is intended for public types, events, and transport contracts, never shared application state. Neither shared package currently exports an API or is consumed by the apps.
+### Applications
 
-## Development
+#### Shell
 
-Use Node.js 22.12+ and npm 10+.
+The application shell.
 
-```sh
+It will own application-level concerns such as navigation, the active user, and display currency. It will later host the People and Delivery applications at runtime.
+
+#### People
+
+Owns the people domain.
+
+It will manage the employee register, employee details, weekly working hours, roles, and effective-dated cost-rate history.
+
+#### Delivery
+
+Owns the delivery-planning domain.
+
+It will manage projects, work breakdown structures, staffing allocations, capacity, and delivery cost views.
+
+### Shared Packages
+
+#### `packages/domain`
+
+Reserved for framework-independent domain logic.
+
+Business calculations such as working-day arithmetic, allocation conversions, effective-dated pricing, capacity calculations, roll-ups, and rounding will live here as pure TypeScript logic where appropriate.
+
+The domain package does not depend on React.
+
+#### `packages/contracts`
+
+Reserved for intentionally shared public contracts between independently owned applications.
+
+This package will contain only contracts that need to cross application boundaries. It will not contain application internals or shared global state.
+
+## Workspace Architecture
+
+The repository uses **npm workspaces** to manage the three applications and shared packages from a single repository.
+
+Keeping the applications in one workspace simplifies local development and shared tooling while preserving explicit application boundaries.
+
+The applications do not import each other's internal source code. Shared functionality must cross a deliberate package or public contract boundary.
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js
+- npm
+
+Install dependencies from the repository root:
+
+```bash
 npm install
+```
+
+### Development
+
+Start all three applications:
+
+```bash
 npm run dev
-npm run build
+```
+
+The applications are available at:
+
+| Application | URL                     |
+| ----------- | ----------------------- |
+| Shell       | `http://localhost:5173` |
+| People      | `http://localhost:5174` |
+| Delivery    | `http://localhost:5175` |
+
+The three development servers run concurrently on fixed ports.
+
+## Quality Checks
+
+Run the test suite:
+
+```bash
 npm run test
-npm run lint
+```
+
+Run TypeScript validation:
+
+```bash
 npm run typecheck
-npm run format
+```
+
+Run linting:
+
+```bash
+npm run lint
+```
+
+Check formatting:
+
+```bash
 npm run format:check
 ```
 
-`dev` runs all three apps concurrently: Shell at <http://localhost:5173>, People at <http://localhost:5174>, and Delivery at <http://localhost:5175>. Ports are fixed; a busy port causes startup to fail. Stop all servers with Ctrl+C.
+Create production builds:
 
-`build` builds every workspace, including JavaScript and declarations for the two packages. `test` runs three minimal application-render smoke tests with Vitest in Node. `lint` checks the repository with ESLint; `typecheck` checks all workspaces and TypeScript tooling configurations using a shared strict base configuration. `format` writes Prettier formatting; `format:check` checks it without changes.
-
-Apps can also run or build independently from the root:
-
-```sh
-npm run dev --workspace @baseline/shell
-npm run build --workspace @baseline/shell
-npm run build --workspace @baseline/people
-npm run build --workspace @baseline/delivery
+```bash
+npm run build
 ```
 
-The root dependency override selects a patched `shell-quote` release for the development launcher.
+## Current Status
 
-Build output is written to each workspace's `dist/` directory and is ignored by Git. Commit the root `package-lock.json` to keep dependency resolution reproducible.
+The repository currently establishes the project foundation only.
 
-## Implementation status
+Implemented:
 
-This is Step 1 only. Domain entities, business calculations, Module Federation, runtime remote loading, persistence, People functionality, Delivery functionality, and Docker/container setup are intentionally not implemented. There is no global shared application store or cross-app communication.
+- npm workspace configuration
+- Three independent React + TypeScript + Vite applications
+- Strict TypeScript configuration
+- ESLint and Prettier
+- Vitest
+- Shared `domain` and `contracts` package boundaries
+- Root development and quality-check commands
+
+Not yet implemented:
+
+- Domain entities
+- Domain calculations
+- Employee management
+- Project and work-breakdown management
+- Staffing allocations
+- Capacity and pricing calculations
+- Persistence
+- Cross-application communication
+- Module Federation
+- Runtime remote loading
+- Failure isolation
+- Docker/container configuration
+
+These capabilities will be introduced incrementally while maintaining clear ownership between Shell, People, and Delivery.
