@@ -4,7 +4,7 @@ Baseline Planning Suite is a delivery-planning application for managing people, 
 
 The application is being developed as three independently built frontend applications: **Shell**, **People**, and **Delivery**.
 
-This repository currently contains the workspace/tooling foundation and framework-independent domain types. Business functionality and micro-frontend integration will be introduced incrementally.
+This repository currently contains the workspace/tooling foundation, framework-independent domain types, and the core allocation calculation engine. Business functionality and micro-frontend integration will be introduced incrementally.
 
 ## Repository Structure
 
@@ -48,9 +48,9 @@ It will manage projects, work breakdown structures, staffing allocations, capaci
 
 #### `packages/domain`
 
-Contains framework-independent domain types with an intentional public entry point at `src/index.ts`.
+Contains framework-independent domain types and allocation calculations with an intentional public entry point at `src/index.ts`.
 
-Business calculations such as working-day arithmetic, allocation conversions, effective-dated pricing, capacity calculations, roll-ups, and rounding will live here as pure TypeScript logic where appropriate.
+Working-day arithmetic, monthly capacity, PM/Percent conversions, and effective-dated allocation pricing are implemented as pure TypeScript. Roll-ups and reconciliation are not implemented.
 
 The domain package does not depend on React.
 
@@ -68,9 +68,21 @@ The model lives in `packages/domain` as plain TypeScript, without React or brows
 - `RateRecord`: ID, employee ID, inclusive `validFrom`, and hourly cost in EUR. A rate remains effective until the next record; there is no `validTo` field.
 - `Project`: ID, name, and status (`Planned | InProgress | Closed`).
 - `BreakdownItem`: ID, project ID, optional parent ID, type (`Deliverable | WorkPackage | Activity`), and name.
-- `Allocation`: ID, project ID, breakdown item ID, employee ID, month, value, and unit (`PM | Hours | Percent | Cost`).
+- `Allocation`: ID, project ID, breakdown item ID, employee ID, month, and canonical `hours`. `AllocationUnit` retains the input/display vocabulary (`PM | Hours | Percent | Cost`).
 
-IDs and roles are strings. Dates use `YYYY-MM-DD` and months use `YYYY-MM` by convention; these formats are not validated by the types. The allocation model preserves the supplied vocabulary. Its canonical representation and boundary conversions remain undecided and unimplemented. No domain calculations or runtime validation are implemented.
+IDs and roles are strings. `DateOnly` and `YearMonth` describe date/month strings; calculation entry points validate calendar formats (`YYYY-MM-DD` and `YYYY-MM`).
+
+## Allocation Calculations
+
+Hours are the canonical stored allocation quantity. Explicit PM and Percent conversions operate at the domain boundary using monthly capacity (`weeklyHours × workingDays / 5`); Percent uses the 0–100 scale. Calculations retain floating-point precision without display rounding.
+
+Working days are Monday–Friday, with no holiday calendar, calculated using UTC date-only operations. Pricing spreads monthly hours evenly across working days and respects inclusive `validFrom` dates, including mid-month rate changes. Unordered rate history is supported without input mutation; rates are scoped to the allocation's employee. Duplicate effective dates for the same employee are rejected as ambiguous.
+
+Pricing returns `totalCostEUR`, `hoursPerWorkingDay`, `missingRateDays`, and `dailyPrices`. Unpriced days contribute €0 and carry a `null` hourly rate, distinct from a real €0/hour rate. Zero-hour blended rates return 0. Zero capacity converts to zero hours; converting positive hours to PM/Percent against zero capacity throws.
+
+Reference: **0.50 PM in March 2026 for A. Okafor (40h/week)** gives 22 working days, **176 monthly hours**, **88 allocation hours**, and **50% capacity**. With €80/hour from 2025-01-01 and €95/hour from 2026-03-12, 8 days at the old rate and 14 at the new rate yield **€7,880**, with a blended rate displayed as **€89.5455/hour**. The underlying blended value remains unrounded.
+
+Core calculations have unit tests that run in Node without React or a browser. Cost → Hours editing, capacity conflict detection, WBS roll-ups, and largest-remainder reconciliation are not implemented.
 
 ## Workspace Architecture
 
@@ -145,7 +157,7 @@ npm run build
 
 ## Current Status
 
-Step 2 adds the domain model to the existing project foundation.
+Step 3 adds the tested core allocation calculation engine to the domain model and project foundation.
 
 Implemented:
 
@@ -156,15 +168,17 @@ Implemented:
 - Vitest
 - Shared `domain` and `contracts` package boundaries
 - Framework-independent domain entities and finite-value union types
+- UTC working days, monthly capacity, and PM/Percent ↔ Hours conversions
+- Effective-dated pricing, missing-rate reporting, and blended hourly rates
+- Domain calculation unit tests
 - Root development and quality-check commands
 
 Not yet implemented:
 
-- Domain calculations
 - Employee management
 - Project and work-breakdown management
-- Staffing allocation functionality and canonical allocation conversions
-- Capacity and pricing calculations
+- Staffing allocation UI and Cost → Hours editing
+- Capacity conflict detection, WBS roll-ups, and largest-remainder reconciliation
 - Persistence
 - Cross-application communication
 - Module Federation
