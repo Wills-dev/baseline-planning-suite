@@ -4,7 +4,7 @@ Baseline Planning Suite is a delivery-planning application for managing people, 
 
 The application is being developed as three independently built frontend applications: **Shell**, **People**, and **Delivery**.
 
-This repository currently contains the initial workspace and tooling foundation. Business functionality and micro-frontend integration will be introduced incrementally.
+This repository currently contains the workspace/tooling foundation and framework-independent domain types. Business functionality and micro-frontend integration will be introduced incrementally.
 
 ## Repository Structure
 
@@ -48,7 +48,7 @@ It will manage projects, work breakdown structures, staffing allocations, capaci
 
 #### `packages/domain`
 
-Reserved for framework-independent domain logic.
+Contains framework-independent domain types with an intentional public entry point at `src/index.ts`.
 
 Business calculations such as working-day arithmetic, allocation conversions, effective-dated pricing, capacity calculations, roll-ups, and rounding will live here as pure TypeScript logic where appropriate.
 
@@ -59,6 +59,18 @@ The domain package does not depend on React.
 Reserved for intentionally shared public contracts between independently owned applications.
 
 This package will contain only contracts that need to cross application boundaries. It will not contain application internals or shared global state.
+
+## Domain Model
+
+The model lives in `packages/domain` as plain TypeScript, without React or browser dependencies:
+
+- `Employee`: ID, name, weekly hours (`20 | 32 | 40`), and role.
+- `RateRecord`: ID, employee ID, inclusive `validFrom`, and hourly cost in EUR. A rate remains effective until the next record; there is no `validTo` field.
+- `Project`: ID, name, and status (`Planned | InProgress | Closed`).
+- `BreakdownItem`: ID, project ID, optional parent ID, type (`Deliverable | WorkPackage | Activity`), and name.
+- `Allocation`: ID, project ID, breakdown item ID, employee ID, month, value, and unit (`PM | Hours | Percent | Cost`).
+
+IDs and roles are strings. Dates use `YYYY-MM-DD` and months use `YYYY-MM` by convention; these formats are not validated by the types. The allocation model preserves the supplied vocabulary. Its canonical representation and boundary conversions remain undecided and unimplemented. No domain calculations or runtime validation are implemented.
 
 ## Workspace Architecture
 
@@ -133,7 +145,7 @@ npm run build
 
 ## Current Status
 
-The repository currently establishes the project foundation only.
+Step 2 adds the domain model to the existing project foundation.
 
 Implemented:
 
@@ -143,15 +155,15 @@ Implemented:
 - ESLint and Prettier
 - Vitest
 - Shared `domain` and `contracts` package boundaries
+- Framework-independent domain entities and finite-value union types
 - Root development and quality-check commands
 
 Not yet implemented:
 
-- Domain entities
 - Domain calculations
 - Employee management
 - Project and work-breakdown management
-- Staffing allocations
+- Staffing allocation functionality and canonical allocation conversions
 - Capacity and pricing calculations
 - Persistence
 - Cross-application communication
