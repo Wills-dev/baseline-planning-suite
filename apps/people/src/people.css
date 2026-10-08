@@ -1,0 +1,138 @@
+.people-page {
+  color: #1f2937;
+  font:
+    16px/1.5 system-ui,
+    sans-serif;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 24px;
+}
+.people-page h1,
+.people-page h2,
+.people-page h3 {
+  line-height: 1.25;
+}
+.people-page header {
+  border-bottom: 1px solid #d1d5db;
+  margin-bottom: 24px;
+}
+.people-layout {
+  display: grid;
+  grid-template-columns: minmax(360px, 1fr) minmax(400px, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+.people-page label {
+  display: block;
+  font-weight: 600;
+  margin: 12px 0 4px;
+}
+.people-page input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #9ca3af;
+  border-radius: 4px;
+  font: inherit;
+}
+.people-page button {
+  padding: 8px 12px;
+  border: 1px solid #6b7280;
+  border-radius: 4px;
+  background: white;
+  color: #1f2937;
+  font: inherit;
+  cursor: pointer;
+}
+.people-page button:hover {
+  background: #eff6ff;
+}
+.people-page button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.people-page :focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 2px;
+}
+.people-page table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+.people-page th,
+.people-page td {
+  padding: 10px 8px;
+  border-bottom: 1px solid #d1d5db;
+  vertical-align: top;
+}
+.people-table-scroll {
+  overflow-x: auto;
+}
+.people-register .people-table-scroll {
+  max-height: 65vh;
+  overflow-y: auto;
+}
+.people-register thead {
+  position: sticky;
+  top: 0;
+  background: #f3f4f6;
+}
+.people-register th button {
+  text-align: left;
+}
+.people-selected-row {
+  background: #dbeafe;
+}
+.people-detail-panel {
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 20px;
+}
+.people-details {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+}
+.people-details dt {
+  font-weight: 600;
+}
+.people-details dd {
+  margin: 0;
+}
+.people-editor {
+  border-top: 1px solid #d1d5db;
+  margin-top: 24px;
+  padding-top: 12px;
+}
+.people-page fieldset {
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+.people-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.people-error {
+  color: #991b1b;
+}
+.people-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+@media (max-width: 900px) {
+  .people-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .people-page {
+    padding: 16px;
+  }
+}
