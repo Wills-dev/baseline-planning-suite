@@ -1,0 +1,12 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - '8080:80'
+    volumes:
+      - type: bind
+        source: ./deployment/runtime
+        target: /etc/baseline-runtime
+        read_only: true

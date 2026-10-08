@@ -6,6 +6,43 @@ The application is being developed as three independently built frontend applica
 
 This repository currently contains the workspace/tooling foundation, framework-independent domain types, the core allocation calculation engine, a public rate-change contract, Module Federation composition, ownership-specific IndexedDB persistence, a searchable People register with rate-history editing, and Delivery project/WBS/staffing planning. Business functionality and micro-frontend integration will be introduced incrementally.
 
+## Running the application
+
+With Docker and Docker Compose installed and Docker running, execute from the repository root:
+
+```bash
+docker compose up
+```
+
+Open **http://localhost:8080**. Docker installs dependencies from the lockfile, builds all three microfrontends, and serves their production artifacts. **No host Node.js, npm, or Vite is required.** The first run needs network access to download the base images and npm packages.
+
+| Application         | URL                             |
+| ------------------- | ------------------------------- |
+| Shell host          | http://localhost:8080/          |
+| People standalone   | http://localhost:8080/people/   |
+| Delivery standalone | http://localhost:8080/delivery/ |
+
+After source changes, rebuild with `docker compose up --build`. Stop/remove containers with `docker compose down`. For a fresh build, run `docker compose build --no-cache` followed by `docker compose up`. Only port 8080 is exposed.
+
+The single `web` service uses a multi-stage Dockerfile: Node 24 runs `npm ci` and independently builds Shell, People, and Delivery; the final Nginx image contains static artifacts and serving configuration, without the Node build environment. `.dockerignore` excludes host `node_modules`, `dist`, Git data, caches, and other local artifacts. People and Delivery use production public bases `/people/` and `/delivery/`; their same artifacts work standalone and hosted. Normal development builds keep `/` as their base.
+
+Runtime files are bind-mounted read-only from **`deployment/runtime/`**, independently of the Shell bundle. `shell.json` serves at `/remote-config.json`:
+
+```json
+{
+  "people": "/people/remoteEntry.js",
+  "delivery": "/delivery/remoteEntry.js"
+}
+```
+
+`delivery.json`, served at `/delivery/remote-config.json`, contains `{ "people": "/people/remoteEntry.js" }`, so standalone Delivery also consumes the authoritative People capability. These are browser-visible same-origin paths, not Docker service names. Editing the files does not require rebuilding or restarting the container.
+
+To demonstrate failure isolation, change only `people` in `deployment/runtime/shell.json` to `/people/missing-entry.js`, reload Shell, and visit People and Delivery. People shows its isolated fallback; Delivery keeps Hours/PM/Percent usable with Cost unavailable. Restore `/people/remoteEntry.js`, then use **Retry People** and Delivery's **Retry People data**. To test Delivery failure, set only `delivery` to `/delivery/missing-entry.js`; People remains usable. Restore `/delivery/remoteEntry.js` and use **Retry Delivery**. Existing healthy pages retain their mounted state; changing a URL does not unload an already loaded page, so begin each failure demonstration with a Shell reload.
+
+Runtime JSON uses `Cache-Control: no-store`; entries and HTML revalidate, and hashed assets are cached immutably. Missing entries/chunks/CSS/JSON return actual 404 responses, while client-side page paths fall back to the appropriate app index. After a deployment that changes asset paths or leaves a failed transitive ESM import cached, a full browser reload may still be necessary.
+
+Application data lives in **browser IndexedDB**, not Docker volumes. `docker compose down` or a container restart does not reset it. The shared origin allows hosted and standalone pages to see the same owner databases, `baseline-planning-people` and `baseline-planning-delivery`; URL paths do not partition IndexedDB. `localhost:8080` is a different origin from development ports, so existing development-port data is not automatically carried over. Rate invalidation remains document-scoped; separate tabs do not exchange `people.rateChanged` events.
+
 ## Repository Structure
 
 ```text
@@ -280,7 +317,7 @@ npm run build
 
 ## Current Status
 
-Steps 8–12 are complete using the supplied official bootstrap. Delivery supports project/WBS planning, all four allocation units, global capacity warnings, authoritative People rate consumption, and live hosted rate invalidation.
+Steps 8–13 are implemented using the supplied official bootstrap. Delivery supports project/WBS planning, all four allocation units, global capacity warnings, authoritative People rate consumption, and live hosted rate invalidation.
 
 Implemented:
 
