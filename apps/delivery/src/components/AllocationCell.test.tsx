@@ -72,9 +72,9 @@ test('reconciles successful save to authoritative state, including later updates
     finish?.(true);
   });
   expect(input()).toBe(original);
-  expect(input().value).toBe('12.345');
+  expect(input().value).toBe('12.35');
   await render(15, onSave);
-  expect(input().value).toBe('15');
+  expect(input().value).toBe('15.00');
 });
 
 test('keeps a dirty draft during authoritative updates and Escape restores the current value', async () => {
@@ -83,9 +83,9 @@ test('keeps a dirty draft during authoritative updates and Escape restores the c
   await render(20);
   expect(input().value).toBe('17');
   await key('Escape');
-  expect(input().value).toBe('20');
+  expect(input().value).toBe('20.00');
   await render(25);
-  expect(input().value).toBe('25');
+  expect(input().value).toBe('25.00');
 });
 
 test('failed save retains the local draft until Escape', async () => {
@@ -94,7 +94,7 @@ test('failed save retains the local draft until Escape', async () => {
   await key('Enter');
   expect(input().value).toBe('17');
   await key('Escape');
-  expect(input().value).toBe('10');
+  expect(input().value).toBe('10.00');
 });
 
 test('unit changes update the same logical grid input from authoritative hours', async () => {
@@ -136,13 +136,13 @@ test('unit changes update the same logical grid input from authoritative hours',
   }
   await grid('Hours');
   const original = input();
-  expect(original.value).toBe('88');
+  expect(original.value).toBe('88.00');
   await grid('PM');
   expect(input()).toBe(original);
-  expect(input().value).toBe('0.5');
+  expect(input().value).toBe('0.50');
   await grid('Percent');
   expect(input()).toBe(original);
-  expect(input().value).toBe('50');
+  expect(input().value).toBe('50.0');
 });
 
 test('parent Cost sums individually priced descendants and stays read-only; missing rates show unavailable', async () => {
@@ -257,13 +257,15 @@ test('global capacity warnings remain accessible on editable and read-only cells
       }),
     ),
   );
-  expect(container.textContent).toContain('125% allocated across all projects');
+  expect(container.textContent).toContain(
+    '125.0% allocated across all projects',
+  );
   expect(container.textContent).toContain('Latest edit saved');
   const description = input()
     .getAttribute('aria-describedby')!
     .split(' ')
     .at(-1)!;
-  expect(document.getElementById(description)?.textContent).toContain('125%');
+  expect(document.getElementById(description)?.textContent).toContain('125.0%');
   await act(async () =>
     root.render(
       createElement(AllocationCell, {
@@ -282,4 +284,44 @@ test('global capacity warnings remain accessible on editable and read-only cells
   );
   expect(container.querySelector('input')).toBeNull();
   expect(container.textContent).not.toContain('Over capacity');
+});
+
+test('rounded clean display never saves; an edited value keeps full input precision', async () => {
+  const onSave = vi.fn(async () => true);
+  await render(87.99999999997, onSave);
+  expect(input().value).toBe('88.00');
+  await key('Enter');
+  await act(async () =>
+    input().dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
+  );
+  expect(onSave).not.toHaveBeenCalled();
+  await edit('87.99999999997');
+  expect(input().value).toBe('87.99999999997');
+  await key('Enter');
+  expect(onSave).toHaveBeenCalledExactlyOnceWith('87.99999999997');
+});
+
+test('exact over-capacity status still warns when display rounds to 100.0%', async () => {
+  await act(async () =>
+    root.render(
+      createElement(AllocationCell, {
+        value: 33.4,
+        unit: 'Percent',
+        label: 'allocation',
+        disabled: false,
+        readOnly: false,
+        onSave: async () => true,
+        capacityStatus: {
+          employeeId: 'e',
+          month: '2026-06',
+          allocatedHours: 176.0704,
+          capacityHours: 176,
+          utilizationPercent: 100.04,
+          overAllocated: true,
+        },
+      }),
+    ),
+  );
+  expect(input().value).toBe('33.4');
+  expect(container.textContent).toContain('Over capacity: 100.0%');
 });

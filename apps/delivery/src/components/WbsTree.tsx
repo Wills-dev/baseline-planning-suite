@@ -1,8 +1,11 @@
 import type { Allocation, BreakdownItem, YearMonth } from '@baseline/domain';
-import { buildWbsTree, rollupHours, workItemPath } from '../application/wbs';
+import { buildWbsTree, workItemPath } from '../application/wbs';
 import type { WbsNode } from '../application/wbs';
 
-const format = new Intl.NumberFormat('en', { maximumFractionDigits: 3 });
+import {
+  deriveWbsHoursDisplay,
+  formatDisplayValue,
+} from '../application/display-values';
 interface Props {
   items: readonly BreakdownItem[];
   planningMonths: readonly YearMonth[];
@@ -23,6 +26,7 @@ export function WbsTree({
   const horizonAllocations = allocations.filter((allocation) =>
     planningMonths.includes(allocation.month),
   );
+  const displayedHours = deriveWbsHoursDisplay(items, horizonAllocations);
   const renderNodes = (nodes: readonly WbsNode[]) => (
     <ul>
       {nodes.map(({ item, children }) => (
@@ -37,7 +41,7 @@ export function WbsTree({
             <span className="delivery-item-type">{item.type}</span>
             <span>{item.name}</span>
             <span className="delivery-item-total">
-              {format.format(rollupHours(item.id, items, horizonAllocations))} h
+              {formatDisplayValue(displayedHours.get(item.id) ?? 0, 'Hours')} h
             </span>
           </button>
           {children.length > 0 && renderNodes(children)}
