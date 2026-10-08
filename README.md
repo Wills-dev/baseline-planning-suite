@@ -133,7 +133,7 @@ Shell fetches `remote-config.json` relative to its Vite base URL before the firs
 
 For development, edit `apps/shell/public/remote-config.json`. At deployment, provide or replace `apps/shell/dist/remote-config.json` with the deployed remote entry URLs; Shell's JavaScript needs no rebuild. The server may serve this file from runtime/container configuration, but no container setup exists yet. URLs are registered once per page session; reload Shell after changing them. Remote hosting must serve the entry and its assets with appropriate cross-origin access. Vite dev and preview servers enable CORS for local composition.
 
-People displays the employee register and rate-history editor; Delivery displays project, WBS, and staffing planning. Document event transport and targeted rate-change synchronization are implemented; dedicated Shell remote failure isolation remains deferred.
+People displays the employee register and rate-history editor; Delivery displays project, WBS, and staffing planning. Document event transport and targeted rate-change synchronization are implemented; Shell remote areas now have independent loading, failure fallbacks, and retry.
 
 ## Persistence and Seed Data
 
@@ -280,7 +280,7 @@ npm run build
 
 ## Current Status
 
-Steps 8–11 are complete using the supplied official bootstrap. Delivery supports project/WBS planning, all four allocation units, global capacity warnings, authoritative People rate consumption, and live hosted rate invalidation.
+Steps 8–12 are complete using the supplied official bootstrap. Delivery supports project/WBS planning, all four allocation units, global capacity warnings, authoritative People rate consumption, and live hosted rate invalidation.
 
 Implemented:
 
@@ -326,7 +326,7 @@ The contracts package provides framework-independent document `CustomEvent` publ
 
 Monthly pricing reuses `priceAllocation`: spread hours evenly over Mon–Fri dates (no holidays), choose the latest rate with inclusive `validFrom` for each date, and sum unrounded daily costs. The next rate implicitly ends the previous one; any number of rate changes works. `costToHours` prices one hour with the same engine and divides entered EUR cost by that monthly blended rate, retaining full precision. Cost is never persisted. Parent cells remain read-only and sum individually priced descendant leaf allocations without double counting or parent records. EUR display uses two decimals and the presentation-only reconciliation described below.
 
-Complete rate coverage is required to display or edit Cost. Missing coverage (including only partly covered months) shows **Cost unavailable: no applicable rate.**, with no invented €0. Invalid or failed rate data also disables Cost and displays an explicit error; PM/Hours/% remain usable. When authority fails, previously loaded names/schedules are retained; on first-load failure only official bootstrap identities/schedules are used for hour planning, with rates emptied and an unavailable-authority message. Retry People data can recover the capability. A real zero-rate month displays €0 but disables Cost editing because the inverse has no unique answer; use the other units. Event transport is document-scoped, not cross-tab/cross-origin synchronization. Full Shell failure isolation is still deferred.
+Complete rate coverage is required to display or edit Cost. Missing coverage (including only partly covered months) shows **Cost unavailable: no applicable rate.**, with no invented €0. Invalid or failed rate data also disables Cost and displays an explicit error; PM/Hours/% remain usable. When authority fails, previously loaded names/schedules are retained; on first-load failure only official bootstrap identities/schedules are used for hour planning, with rates emptied and an unavailable-authority message. Retry People data can recover the capability. A real zero-rate month displays €0 but disables Cost editing because the inverse has no unique answer; use the other units. Event transport is document-scoped, not cross-tab/cross-origin synchronization. Shell page failures are isolated separately from this capability failure behavior.
 
 The supplied Adaeze March reference is verified using the actual seed despite remaining outside the visible Apr 2026–Mar 2027 horizon: 40h/week, 22 weekdays, 176h capacity, 0.50 PM = 88h = 50%; 4h/day at €80 for eight weekdays and €95 from March 12 for fourteen weekdays gives **€7,880**, with blended rate **€89.5454545/h**. No fixture or horizon change is needed.
 
@@ -345,3 +345,13 @@ Independently rounded siblings can disagree with the rounded parent. The pure `r
 Cost leaves are individually priced using authoritative effective-dated histories before aggregation and reconciliation. Missing/failed Cost stays unavailable and propagates to ancestors; genuine zero rates remain zero with ambiguous Cost editing disabled. This is presentation only: reconciled values never enter persistence, conversions, pricing, allocation identity, or capacity. Capacity warnings still use exact utilization >100%, even when the displayed percentage rounds to 100.0%.
 
 Reconciliation conserves **integer display units**; ordinary JavaScript decimal sums can still have binary floating-point residue. Precision is limited to 0–6 decimal places and safely representable integer display totals. Sibling order follows the existing WBS order; no random ordering or synthetic parent allocations are introduced.
+
+## Shell remote failure isolation and recovery (Step 12)
+
+Shell navigation remains outside each remote's `RemoteErrorBoundary`. Each visited page has its own boundary and Suspense loading state. People or Delivery loading/rendering failures show an accessible, named fallback without stack traces; the other page remains usable. Both may fail without replacing the Shell. Visited healthy pages remain mounted while hidden, preserving selections and drafts during navigation.
+
+Runtime configuration is requested with `cache: no-store`. Each loader validates and registers only its own HTTP(S) URL; a missing/invalid sibling URL cannot block it. Network/status/JSON/shape failures reject into the page boundary and are not permanently cached. Entry and exposure failures likewise propagate; no hard-coded URL or fixture page substitutes for a broken configured application.
+
+**Retry People / Retry Delivery** creates a fresh lazy component and boundary, fetches configuration again, and re-registers only that remote with Federation's `force` option when already registered. A `baseline-retry` query parameter on the entry URL avoids reuse of a browser-cached rejected entry import. Healthy sibling pages are not remounted. Delivery's **Retry People data** also makes a fresh authority load after capability failure. People page and `PlanningRates` exposures remain separate: failure of the capability leaves Hours/PM/Percent usable and Cost unavailable; it does not create a Shell Delivery fallback.
+
+Boundaries cover React rendering and rejected lazy loads, not arbitrary event-handler or asynchronous application errors; those retain their existing application handling. Retry requires a compatible reachable service and an entry endpoint that accepts query parameters. A failed transitive ESM chunk can remain cached by its unchanged URL; a full browser reload may be needed after such a deployment failure. Request timeouts, cross-tab coordination, backend work, deployment changes, and automatic retry loops are outside this step.
