@@ -8,7 +8,7 @@ export default defineConfig({
     federation({
       name: 'people',
       filename: 'remoteEntry.js',
-      exposes: { './PeoplePage': './src/PeoplePage.tsx' },
+      exposes: { './PeoplePage': './src/federated-page.ts' },
       shared: {
         react: { singleton: true },
         'react-dom': { singleton: true },

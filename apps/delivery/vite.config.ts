@@ -8,7 +8,7 @@ export default defineConfig({
     federation({
       name: 'delivery',
       filename: 'remoteEntry.js',
-      exposes: { './DeliveryPage': './src/DeliveryPage.tsx' },
+      exposes: { './DeliveryPage': './src/federated-page.ts' },
       shared: {
         react: { singleton: true },
         'react-dom': { singleton: true },
