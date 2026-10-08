@@ -1,0 +1,15 @@
+**/node_modules
+**/dist
+**/.vite
+**/coverage
+**/*.tsbuildinfo
+**/*.log
+**/.DS_Store
+.git
+.github
+.agents
+.codex
+.aws
+.env
+.env.*
+!.env.example
