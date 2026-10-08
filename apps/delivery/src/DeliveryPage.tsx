@@ -1,16 +1,35 @@
+import type { PlanningPeopleLoader } from '@baseline/contracts';
 import { useDelivery } from './application/use-delivery';
 import { ProjectSelector } from './components/ProjectSelector';
 import { ProjectPlanningPanel } from './components/ProjectPlanningPanel';
 import './delivery.css';
 
-export default function DeliveryPage() {
-  const planning = useDelivery();
+export default function DeliveryPage({
+  loadPlanningPeople,
+}: {
+  loadPlanningPeople?: PlanningPeopleLoader;
+}) {
+  const planning = useDelivery(loadPlanningPeople);
   return (
     <div className="delivery-page">
       <header>
         <h1>Baseline Planning — Delivery</h1>
         <p>Project work breakdown and canonical-hour staffing plans.</p>
       </header>
+      {planning.peopleStatus && (
+        <p
+          role={
+            planning.peopleStatus.includes('unavailable') ? 'alert' : undefined
+          }
+        >
+          {planning.peopleStatus}
+        </p>
+      )}
+      {planning.peopleStatus.includes('unavailable') && (
+        <button type="button" onClick={() => void planning.retryPeople()}>
+          Retry People data
+        </button>
+      )}
       {planning.initialLoading ? (
         <p role="status">Loading planning data…</p>
       ) : planning.initialError ? (

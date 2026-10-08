@@ -1,3 +1,5 @@
+import { capacityKey } from '@baseline/domain';
+import type { PlanningPeopleProvider, PlanningPerson } from './planning-people';
 import { describe, expect, test, vi } from 'vitest';
 import type { DeliveryRepository } from '../persistence/delivery-repository';
 import { createDeliveryFixtures } from '../persistence/fixtures';
@@ -5,6 +7,7 @@ import { createDeliveryService } from './delivery-service';
 import { createFixturePlanningPeopleProvider } from './planning-people';
 import {
   allocationIdentity,
+  priceCellHours,
   hoursToDisplay,
   inputToHours,
 } from './allocation-values';
@@ -58,19 +61,21 @@ function setup() {
   };
 }
 
-test('temporary read model matches 60 stable fixture identities without rates', async () => {
+test('explicit bootstrap read model matches 60 stable fixture identities and rate histories', async () => {
   const people = await provider.listPeople();
   expect(people).toHaveLength(60);
   expect(people[0]).toEqual({
     employeeId: 'emp-001',
     name: 'Adaeze Okafor',
     weeklyHours: 40,
+    rates: expect.any(Array),
   });
   expect(await provider.listPeople()).toEqual(people);
   for (const person of people)
     expect(Object.keys(person).sort()).toEqual([
       'employeeId',
       'name',
+      'rates',
       'weeklyHours',
     ]);
 });
@@ -371,4 +376,225 @@ test('initialization exposes the bootstrap horizon as application configuration'
   expect(planningMonths).toHaveLength(12);
   expect(planningMonths[0]).toBe('2026-04');
   expect(planningMonths.at(-1)).toBe('2027-03');
+});
+
+test('official March integration and Cost input use the same effective-dated model', async () => {
+  const { repository, service } = setup();
+  const person = (await service.initialize()).people[0]!;
+  const march = (await repository.listAllocations()).find(
+    (allocation) => allocation.id === 'alloc-001',
+  )!;
+  expect(march.hours).toBe(88);
+  expect(hoursToDisplay(march.hours, 'PM', person, march.month)).toBe(0.5);
+  expect(hoursToDisplay(march.hours, 'Percent', person, march.month)).toBe(50);
+  expect(hoursToDisplay(march.hours, 'Cost', person, march.month)).toBe(7880);
+  expect(inputToHours('7880', 'Cost', person, march.month)).toBeCloseTo(88, 12);
+  // Visible horizon remains supplied April–March; use a visible split-rate month to save Cost.
+  const jonas = (await provider.getPerson('emp-007'))!;
+  const hours = 13.123456789;
+  const cost = hoursToDisplay(hours, 'Cost', jonas, '2026-05');
+  const data = await service.saveCell(
+    projectId,
+    leafId,
+    jonas.employeeId,
+    '2026-05',
+    String(cost),
+    'Cost',
+  );
+  const stored = data.allocations.find(
+    (allocation) =>
+      allocation.employeeId === jonas.employeeId &&
+      allocation.breakdownItemId === leafId &&
+      allocation.month === '2026-05',
+  )!;
+  expect(stored.hours).toBeCloseTo(hours, 12);
+  expect(Object.keys(stored).sort()).toEqual([
+    'breakdownItemId',
+    'employeeId',
+    'hours',
+    'id',
+    'month',
+    'projectId',
+  ]);
+});
+
+test('targeted authoritative refresh changes cost without changing persisted hours or global capacity', async () => {
+  const repository = memoryRepository();
+  const snapshots = await provider.listPeople();
+  let current = snapshots.find((person) => person.employeeId === 'emp-003')!;
+  const authoritative: PlanningPeopleProvider = {
+    listPeople: vi.fn(async () => snapshots),
+    getPerson: vi.fn(async (id) =>
+      id === current.employeeId ? current : undefined,
+    ),
+  };
+  const service = createDeliveryService(repository, authoritative);
+  const before = await service.loadProject('prj-1');
+  const original = await repository.listAllocations();
+  const key = capacityKey('emp-003', '2026-06');
+  expect(before.capacityStatuses.get(key)?.utilizationPercent).toBe(118);
+  expect(before.latestCapacityEdits.size).toBe(0);
+  const oldCost = hoursToDisplay(88, 'Cost', current, '2026-06');
+  current = {
+    ...current,
+    rates: current.rates.map((rate) => ({
+      ...rate,
+      hourlyCostEUR: rate.hourlyCostEUR * 2,
+    })),
+  };
+  const refreshed = await service.refreshPerson('emp-003');
+  expect(authoritative.getPerson).toHaveBeenCalledExactlyOnceWith('emp-003');
+  expect(authoritative.listPeople).toHaveBeenCalledTimes(1);
+  expect(
+    hoursToDisplay(
+      88,
+      'Cost',
+      refreshed.find((person) => person.employeeId === 'emp-003')!,
+      '2026-06',
+    ),
+  ).toBeCloseTo(oldCost * 2, 10);
+  const after = await service.loadProject('prj-3');
+  expect(after.capacityStatuses.get(key)).toEqual(
+    before.capacityStatuses.get(key),
+  );
+  expect(await repository.listAllocations()).toEqual(original);
+});
+
+test('missing rates reject Cost writes but preserve PM/Hours/Percent editing', async () => {
+  const repository = memoryRepository();
+  const person = { ...(await provider.getPerson('emp-016'))!, rates: [] };
+  const service = createDeliveryService(repository, {
+    listPeople: async () => [person],
+    getPerson: async () => person,
+  });
+  const save = vi.spyOn(repository, 'saveAllocation');
+  expect(priceCellHours(88, person, '2026-04')).toMatchObject({
+    costEUR: null,
+    editable: false,
+    unavailable: 'Cost unavailable: no applicable rate.',
+  });
+  await expect(
+    service.saveCell(
+      projectId,
+      leafId,
+      person.employeeId,
+      '2026-04',
+      '100',
+      'Cost',
+    ),
+  ).rejects.toThrow('no applicable rate');
+  expect(save).not.toHaveBeenCalled();
+  for (const unit of ['Hours', 'PM', 'Percent'] as const)
+    await expect(
+      service.saveCell(
+        projectId,
+        leafId,
+        person.employeeId,
+        '2026-04',
+        '1',
+        unit,
+      ),
+    ).resolves.toBeDefined();
+});
+
+test('refresh failure clears stale prices; older targeted responses cannot replace newer authority', async () => {
+  const repository = memoryRepository();
+  const person = (await provider.getPerson('emp-001'))!;
+  const get = vi.fn(async () => person);
+  const service = createDeliveryService(repository, {
+    listPeople: async () => [person],
+    getPerson: get,
+  });
+  await service.initialize();
+  get.mockRejectedValueOnce(new Error('offline'));
+  expect((await service.refreshPerson(person.employeeId))[0]).toMatchObject({
+    rates: [],
+    rateDataError: expect.stringContaining('unavailable'),
+  });
+  let resolveOlder: ((person: PlanningPerson) => void) | undefined;
+  get.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        resolveOlder = resolve;
+      }),
+  );
+  const older = service.refreshPerson(person.employeeId);
+  await Promise.resolve();
+  await Promise.resolve();
+  const newer = {
+    ...person,
+    rates: person.rates.map((rate) => ({ ...rate, hourlyCostEUR: 200 })),
+  };
+  get.mockResolvedValueOnce(newer);
+  await service.refreshPerson(person.employeeId);
+  resolveOlder?.(person);
+  await older;
+  expect(service.currentPeople()[0]?.rates[0]?.hourlyCostEUR).toBe(200);
+});
+
+test('save over capacity warns and subsequent reduction/deletion clears derived session ownership', async () => {
+  const { service } = setup();
+  const key = capacityKey('emp-003', '2026-06');
+  let data = await service.saveCell(
+    projectId,
+    leafId,
+    'emp-003',
+    '2026-06',
+    '176',
+    'Hours',
+  );
+  expect(data.capacityStatuses.get(key)?.overAllocated).toBe(true);
+  expect(data.latestCapacityEdits.get(key)).toEqual({
+    projectId,
+    breakdownItemId: leafId,
+  });
+  data = await service.saveCell(
+    projectId,
+    leafId,
+    'emp-003',
+    '2026-06',
+    '1',
+    'Hours',
+  );
+  expect(data.capacityStatuses.get(key)?.overAllocated).toBe(false);
+  expect(data.latestCapacityEdits.has(key)).toBe(false);
+  data = await service.saveCell(
+    projectId,
+    leafId,
+    'emp-003',
+    '2026-06',
+    '0',
+    'Hours',
+  );
+  expect(data.capacityStatuses.get(key)?.overAllocated).toBe(false);
+});
+
+test('a rate invalidation during slow initialization is retained in the returned snapshot', async () => {
+  const repository = memoryRepository();
+  let finish:
+    | ((
+        projects: Awaited<ReturnType<DeliveryRepository['listProjects']>>,
+      ) => void)
+    | undefined;
+  const projects = await repository.listProjects();
+  vi.spyOn(repository, 'listProjects').mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const person = (await provider.getPerson('emp-001'))!;
+  const newer = {
+    ...person,
+    rates: person.rates.map((rate) => ({ ...rate, hourlyCostEUR: 110 })),
+  };
+  const service = createDeliveryService(repository, {
+    listPeople: async () => [person],
+    getPerson: async () => newer,
+  });
+  const initializing = service.initialize();
+  await vi.waitFor(() => expect(finish).toBeDefined());
+  await service.refreshPerson(person.employeeId);
+  finish?.(projects);
+  expect((await initializing).people[0]?.rates[0]?.hourlyCostEUR).toBe(110);
 });

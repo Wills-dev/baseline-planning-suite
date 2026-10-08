@@ -21,13 +21,11 @@ export function UnitSelector({
         <option value="PM">PM</option>
         <option value="Hours">Hours</option>
         <option value="Percent">% capacity</option>
-        <option value="Cost" disabled>
-          Cost (unavailable)
-        </option>
+        <option value="Cost">Cost (EUR)</option>
       </select>
       <p id="delivery-cost-help">
-        Cost is unavailable until authoritative People rates are connected. No
-        rate data is copied into Delivery.
+        Cost is derived in EUR from effective-dated monthly rates. Only hours
+        are persisted.
       </p>
     </div>
   );

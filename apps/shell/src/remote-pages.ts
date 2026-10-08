@@ -1,4 +1,9 @@
+import { createElement } from 'react';
 import type { ComponentType } from 'react';
+import type {
+  PlanningPeopleCapability,
+  PlanningPeopleLoader,
+} from '@baseline/contracts';
 import { loadRemote, registerRemotes } from '@module-federation/runtime';
 
 interface RemotePageModule {
@@ -46,9 +51,32 @@ export async function loadPeoplePage(): Promise<RemotePageModule> {
   return module;
 }
 
+export async function loadPlanningPeopleCapability(): Promise<PlanningPeopleCapability> {
+  await registerConfiguredRemotes();
+  const capability = await loadRemote<PlanningPeopleCapability>(
+    'people/PlanningRates',
+  );
+  if (
+    !capability ||
+    typeof capability.listPlanningPeople !== 'function' ||
+    typeof capability.getPlanningPerson !== 'function'
+  )
+    throw new Error('People planning capability unavailable');
+  return capability;
+}
+
 export async function loadDeliveryPage(): Promise<RemotePageModule> {
   await registerConfiguredRemotes();
-  const module = await loadRemote<RemotePageModule>('delivery/DeliveryPage');
+  const module = await loadRemote<{
+    default: ComponentType<{ loadPlanningPeople?: PlanningPeopleLoader }>;
+  }>('delivery/DeliveryPage');
   if (!module) throw new Error('DeliveryPage was not returned by the remote');
-  return module;
+  const Page = module.default;
+  return {
+    default: function HostedDeliveryPage() {
+      return createElement(Page, {
+        loadPlanningPeople: loadPlanningPeopleCapability,
+      });
+    },
+  };
 }
