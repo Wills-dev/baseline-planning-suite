@@ -1,2 +1,1 @@
-// Intentionally empty until public contracts are introduced.
-export {};
+export type { PeopleRateChangedEvent } from './people-events.js';
