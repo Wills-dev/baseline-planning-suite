@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview"
   },
   "dependencies": {
+    "@module-federation/runtime": "^2.9.2",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   }
