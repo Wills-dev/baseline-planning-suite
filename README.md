@@ -4,7 +4,7 @@ Baseline Planning Suite is a delivery-planning application for managing people, 
 
 The application is being developed as three independently built frontend applications: **Shell**, **People**, and **Delivery**.
 
-This repository currently contains the workspace/tooling foundation, framework-independent domain types, the core allocation calculation engine, a public rate-change contract, Module Federation composition, ownership-specific IndexedDB persistence, and a searchable People register with rate-history editing. Business functionality and micro-frontend integration will be introduced incrementally.
+This repository currently contains the workspace/tooling foundation, framework-independent domain types, the core allocation calculation engine, a public rate-change contract, Module Federation composition, ownership-specific IndexedDB persistence, a searchable People register with rate-history editing, and Delivery project/WBS/staffing planning. Business functionality and micro-frontend integration will be introduced incrementally.
 
 ## Repository Structure
 
@@ -43,7 +43,7 @@ Provides the searchable employee register, employee details, weekly hours/roles,
 
 Owns the delivery-planning domain.
 
-It will manage projects, work breakdown structures, staffing allocations, capacity, and delivery cost views.
+Provides project selection, three-level WBS editing, leaf staffing allocations, and derived parent totals. Cross-project capacity warnings and authoritative cost views remain deferred.
 
 ### Shared Packages
 
@@ -69,7 +69,7 @@ The model lives in `packages/domain` as plain TypeScript, without React or brows
 
 - `Employee`: ID, name, weekly hours (`20 | 32 | 40`), and role.
 - `RateRecord`: ID, employee ID, inclusive `validFrom`, and hourly cost in EUR. A rate remains effective until the next record; there is no `validTo` field.
-- `Project`: ID, name, and status (`Planned | InProgress | Closed`).
+- `Project`: ID, name, optional start/end dates, and optional status (`Planned | InProgress | Closed`). The official seed supplies dates but no status; the mapper does not invent one.
 - `BreakdownItem`: ID, project ID, optional parent ID, type (`Deliverable | WorkPackage | Activity`), and name.
 - `Allocation`: ID, project ID, breakdown item ID, employee ID, month, and canonical `hours`. `AllocationUnit` retains the input/display vocabulary (`PM | Hours | Percent | Cost`).
 
@@ -83,9 +83,9 @@ Working days are Monday–Friday, with no holiday calendar, calculated using UTC
 
 Pricing returns `totalCostEUR`, `hoursPerWorkingDay`, `missingRateDays`, and `dailyPrices`. Unpriced days contribute €0 and carry a `null` hourly rate, distinct from a real €0/hour rate. Zero-hour blended rates return 0. Zero capacity converts to zero hours; converting positive hours to PM/Percent against zero capacity throws.
 
-Reference: **0.50 PM in March 2026 for A. Okafor (40h/week)** gives 22 working days, **176 monthly hours**, **88 allocation hours**, and **50% capacity**. With €80/hour from 2025-01-01 and €95/hour from 2026-03-12, 8 days at the old rate and 14 at the new rate yield **€7,880**, with a blended rate displayed as **€89.5455/hour**. The underlying blended value remains unrounded.
+Reference: **0.50 PM in March 2026 for Adaeze Okafor (40h/week)** gives 22 working days, **176 monthly hours**, **88 allocation hours**, and **50% capacity**. With €80/hour from 2025-01-01 and €95/hour from 2026-03-12, 8 days at the old rate and 14 at the new rate yield **€7,880**, with a blended rate displayed as **€89.5455/hour**. The underlying blended value remains unrounded.
 
-Core calculations have unit tests that run in Node without React or a browser. Cost → Hours editing, capacity conflict detection, WBS roll-ups, and largest-remainder reconciliation are not implemented.
+Core calculations have unit tests that run in Node without React or a browser. Delivery now derives WBS parent totals in its pure application layer. Cost → Hours editing, capacity conflict detection, and largest-remainder reconciliation remain unimplemented.
 
 ## Workspace Architecture
 
@@ -133,7 +133,7 @@ Shell fetches `remote-config.json` relative to its Vite base URL before the firs
 
 For development, edit `apps/shell/public/remote-config.json`. At deployment, provide or replace `apps/shell/dist/remote-config.json` with the deployed remote entry URLs; Shell's JavaScript needs no rebuild. The server may serve this file from runtime/container configuration, but no container setup exists yet. URLs are registered once per page session; reload Shell after changing them. Remote hosting must serve the entry and its assets with appropriate cross-origin access. Vite dev and preview servers enable CORS for local composition.
 
-People displays the employee register and rate-history editor; Delivery still displays only its application name. Event transport, rate-change synchronization, and dedicated remote failure isolation remain unimplemented.
+People displays the employee register and rate-history editor; Delivery displays project, WBS, and staffing planning. Event transport, rate-change synchronization, and dedicated remote failure isolation remain unimplemented.
 
 ## Persistence and Seed Data
 
@@ -146,18 +146,19 @@ IndexedDB is the current browser persistence mechanism. Domain-oriented reposito
 
 All stores use `id` as their key. Separate databases keep ownership and schema upgrades independent. People owns employee lookup and rate-history CRUD; Delivery owns project lookup, WBS-record upsert/delete, and canonical-hour allocation upsert/delete. Components do not manipulate IndexedDB. Repositories live under each app's `src/persistence`; none are exposed through federation. Record deletion is not an implicit cascading WBS operation.
 
-People initializes its repository through the page loading hook, showing recoverable storage errors in the UI. Delivery initializes its repository through its standalone bootstrap and federated entry before rendering. Initialization inserts fixtures only into an empty, uninitialized owner database. Fixture writes and the `_metadata` marker commit in one transaction; simultaneous initialization is serialized. Reloads preserve edits and deletions, including a database whose user records were all deleted. Existing unmarked nonempty data is preserved without backfilling fixtures. Schema versions are explicit; future migrations must extend the upgrade path without resetting data or reapplying seeds.
+People and Delivery initialize through page loading hooks. The supplied [`fixtures/baseline-seed.json`](fixtures/baseline-seed.json) is the authoritative bootstrap source. `fixtures/official-seed.ts` types and maps the external schema into domain values; React components and repositories never parse raw JSON. Owner fixture modules select only their own mapped collections. Each mapping returns fresh records.
 
-Fixture generators are separate pure TypeScript modules with stable IDs and no randomness or current-time input:
+The supplied dataset contains **60 employees, 150 rates, four projects, 90 WBS items, and 720 allocations**. All supplied IDs, names, roles, schedules, dates, relationships, and numeric quantities are preserved. Allocation amounts and hourly costs must be finite and non-negative at the external mapping boundary. `hourlyCost` maps to `hourlyCostEUR`. WBS types derive from parent depth (Deliverable → WorkPackage → Activity); null roots map to omitted internal parent IDs. Allocation `amount` is interpreted as PM and converted into full-precision canonical hours using the supplied employee schedule and allocation month. Project IDs derive from each allocation's WBS reference.
 
-- 60 employees and 150 rates, with 90 mid-month effective-date changes.
-- A. Okafor (`employee-01`, 40h/week): €80/hour from 2025-01-01 and €95/hour from 2026-03-12, preserving the €7,880 March reference scenario.
-- Four projects with allocations overlapping across January–December 2026; 90 three-level WBS items (Deliverable → WorkPackage → Activity).
-- 720 distinct employee-month cells and 721 allocation records. All allocations store only canonical hours. A. Okafor has 88 Atlas hours and 132 Beacon hours in March, providing an overlapping-project scenario for later capacity work.
+The grid horizon comes from JSON metadata: **Apr 2026–Mar 2027**, expanded once into twelve `YearMonth` values. Delivery exposes this through application bootstrap configuration and its initialization result; the hook passes the horizon to components without importing persistence fixtures. The supplied March 2026 allocation `alloc-001` for Adaeze Okafor (`emp-001`) is retained even though it lies outside that grid. It maps from 0.5 PM to 88 hours. Her supplied `rate-001` and `rate-002` are €80 from 2025-01-01 and €95 from 2026-03-12.
 
-Delivery fixtures use the same stable `employee-01`–`employee-60` ID convention as People fixtures; this is seed-data coordination, not authoritative People-data access. Generators use existing domain types and domain calculations for reference hours.
+People owns mutable employee/rate state; Delivery owns mutable projects/WBS/allocations. Sharing bootstrap input does not share runtime ownership or persistence. Delivery's temporary planning-person provider selects only ID/name/weekly hours from the official mapper and never reads People storage or copies mutable rate state. Authoritative runtime access remains deferred.
 
-Browser storage is origin-scoped: standalone apps on separate ports have separate storage from hosted apps executing at the Shell origin. Cross-application authoritative data retrieval, `people.rateChanged` transport/publication, and live synchronization are not implemented. People UI is implemented; real Delivery UI remains unimplemented.
+**Fixture migration:** schema version stays 1 because no stores/indexes change. The `_metadata` record `fixtures-initialized` now carries `version: official-1.0.0`. An existing marker without a version identifies the old generated bootstrap and triggers a **one-time replacement of all records in that owner database**, including development edits, with official fixtures. Clearing, inserting, and updating the marker commit atomically in one transaction; concurrent tabs serialize initialization. This deliberate development reset avoids retaining orphaned edits referencing obsolete IDs. It is not a production user-data migration.
+
+After this migration, reloads preserve additions, edits, and deletions, including empty stores. A fresh empty database seeds once. Unmarked nonempty data is preserved and marked without backfilling. An unrecognized version is rejected and requires an explicit future migration; changing JSON metadata never silently resets a versioned database. No manual DevTools deletion is needed for the known legacy fixture marker.
+
+Browser storage is origin-scoped: standalone apps on separate ports have separate storage from hosted apps executing at the Shell origin. Cross-application authoritative data retrieval, `people.rateChanged` transport/publication, and live synchronization are not implemented. People and Delivery planning are implemented; rate synchronization and cross-project capacity warnings remain deferred.
 
 ## People Register and Rate Editing
 
@@ -168,6 +169,20 @@ The application service/hook owns repository calls and local React state; regist
 Successful mutations refresh the selected history. Persisted edits and deletions survive browser reload without reseeding. Hourly rates display as EUR with two decimals; stored values retain entered precision. There is no end-date field or currency conversion. Duplicate-date validation is application-level, not a cross-tab transactional uniqueness constraint; simultaneous independent tabs are not coordinated.
 
 `people.rateChanged` publication/transport and Delivery synchronization remain unimplemented. Storage remains origin-scoped, so standalone People and People hosted at a different Shell origin have separate databases.
+
+## Delivery Project Planning
+
+Delivery works standalone and through Shell using the same `DeliveryPage`. Project selection loads only that project's WBS and allocations and resets its editing context; a request guard discards stale project responses, including delayed reads that complete after a newer selection. Components use a local hook/service/repository flow and never access IndexedDB.
+
+The three-level WBS is **Deliverable → WorkPackage → Activity**. Items can be created, renamed, moved to valid parents of the same project, and deleted after confirmation. Type changes and invalid nesting are rejected. Adding or moving a child beneath an allocated item is refused; deleting an item with children or allocations is refused. Nothing is silently cascaded, moved, or orphaned.
+
+Select a work item to see a horizontally scrolling **60-person × 12-month (Apr 2026–Mar 2027)** grid. The selected path is explicit. Actual leaves, including empty Deliverables/WorkPackages, permit allocation editing; parent selections show read-only descendant totals. Tree totals show derived hours across the horizon, while the parent grid derives per-person/month values. Parent totals are never persisted.
+
+PM, Hours, and % capacity derive from canonical `Allocation.hours` using the domain working-day, capacity, and conversion functions. The supplied March reference remains **0.50 PM = 88 hours = 50%**, outside the visible horizon. Unit changes do not write data. Cells save on Enter or blur; Escape restores the latest authoritative value. Each input holds a local draft only while dirty; clean and successfully saved inputs display current application values without remounting. Cell identity uses work item, employee, and month, independent of units or allocation amounts. Values must be finite and non-negative; converted hours retain full precision. **Zero deletes the logical allocation record.**
+
+New allocation IDs encode `(projectId, breakdownItemId, employeeId, month)` deterministically; existing seeded IDs are retained. Repeated edits update the same record. Duplicate existing logical records are rejected rather than silently merged. The current page serializes mutations and disables project, WBS, and unit selection while saving. A separate cell guard prevents Enter/blur from submitting twice, and changing the selected work item resets cell drafts and WBS editor state. The request guard also cancels responses after unmount; cross-tab conflict coordination is not implemented.
+
+The `PlanningPeopleProvider` boundary in Delivery's `application/planning-people.ts` supplies a clearly marked temporary Step-8 fixture read model containing only employee ID, name, and weekly hours. It derives supplied bootstrap identities without importing People or reading its storage; it can be replaced with authoritative access in Step 10. It contains no rates. **Cost is disabled** with an explanation until authoritative People pricing data is connected. No Delivery-owned rate source or cross-remote synchronization is implemented.
 
 ## Getting Started
 
@@ -265,7 +280,7 @@ npm run build
 
 ## Current Status
 
-Step 7 adds the People employee register and persisted effective-dated rate editor to the existing repositories and federated composition.
+Step 8 is complete using the supplied official bootstrap. Delivery supports project selection, WBS editing, leaf allocations, and parent totals; Cost remains unavailable until authoritative People integration.
 
 Implemented:
 
@@ -283,16 +298,18 @@ Implemented:
 - Shell federation host and independently built People/Delivery remotes
 - Standalone and hosted public pages, shared React singletons, and runtime remote configuration
 - Native IndexedDB infrastructure, owner repositories, and atomic one-time fixture seeding
-- Deterministic People/Delivery fixtures with focused invariant tests
+- Official mapped People/Delivery fixtures with focused invariant tests
 - People name/role search, employee details, chronological rate history, and validated persisted rate CRUD
 - Focused People search, validation, and repository-orchestration tests
+- Delivery project selection, safe WBS editing, Apr 2026–Mar 2027 leaf staffing grid, and canonical-hour unit conversions
+- Derived parent totals and focused WBS/allocation application tests
+- Temporary Delivery planning-person provider; Cost deliberately unavailable
 - Root development and quality-check commands
 
 Not yet implemented:
 
-- Delivery project and WBS UI
-- Staffing allocation UI and Cost → Hours editing
-- Capacity conflict detection, WBS roll-ups, and largest-remainder reconciliation
+- Authoritative Delivery cost views and Cost → Hours editing
+- Cross-project capacity warnings and largest-remainder reconciliation
 - Cross-application event transport, authoritative data retrieval, and live recalculation
 - Failure isolation
 - Docker/container configuration

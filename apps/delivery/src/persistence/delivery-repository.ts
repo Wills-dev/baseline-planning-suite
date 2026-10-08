@@ -1,3 +1,4 @@
+import { officialSeedVersion } from '../../../../fixtures/official-seed';
 import type { Allocation, BreakdownItem, Project } from '@baseline/domain';
 import { createDatabase } from '@baseline/persistence';
 import { createDeliveryFixtures } from './fixtures';
@@ -26,6 +27,8 @@ export function createDeliveryRepository(): DeliveryRepository {
   const database = createDatabase<DeliveryStores>({
     name: 'baseline-planning-delivery',
     version: 1,
+    seedVersion: officialSeedVersion,
+    replaceLegacySeed: true,
     stores: [
       { name: 'projects' },
       {

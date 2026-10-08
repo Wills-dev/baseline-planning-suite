@@ -42,10 +42,12 @@ test('People fixtures have deterministic scale, valid schedules, and unique effe
   expect(midMonthChanges.length).toBeGreaterThanOrEqual(10);
 });
 
-test('A. Okafor fixtures preserve the reference rates and March pricing', () => {
+test('Adaeze Okafor fixtures preserve the reference rates and March pricing', () => {
   const fixtures = createPeopleFixtures();
-  const employee = fixtures.employees.find((item) => item.name === 'A. Okafor');
-  expect(employee).toMatchObject({ id: 'employee-01', weeklyHours: 40 });
+  const employee = fixtures.employees.find(
+    (item) => item.name === 'Adaeze Okafor',
+  );
+  expect(employee).toMatchObject({ id: 'emp-001', weeklyHours: 40 });
   const rates = fixtures.rateRecords.filter(
     (rate) => rate.employeeId === employee?.id,
   );
@@ -60,7 +62,7 @@ test('A. Okafor fixtures preserve the reference rates and March pricing', () => 
       id: 'reference',
       projectId: 'reference',
       breakdownItemId: 'reference',
-      employeeId: 'employee-01',
+      employeeId: 'emp-001',
       month: '2026-03',
       hours: 88,
     },
@@ -73,7 +75,7 @@ test('A. Okafor fixtures preserve the reference rates and March pricing', () => 
   );
 });
 
-test('callers can change generated fixtures without changing future fixture generation', () => {
+test('callers can change mapped fixtures without changing future fixture mapping', () => {
   const fixtures = createPeopleFixtures();
   const rate = fixtures.rateRecords[0];
   if (!rate) throw new Error('Missing fixture rate');
