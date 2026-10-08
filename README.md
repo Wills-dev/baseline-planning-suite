@@ -85,7 +85,7 @@ Pricing returns `totalCostEUR`, `hoursPerWorkingDay`, `missingRateDays`, and `da
 
 Reference: **0.50 PM in March 2026 for Adaeze Okafor (40h/week)** gives 22 working days, **176 monthly hours**, **88 allocation hours**, and **50% capacity**. With €80/hour from 2025-01-01 and €95/hour from 2026-03-12, 8 days at the old rate and 14 at the new rate yield **€7,880**, with a blended rate displayed as **€89.5455/hour**. The underlying blended value remains unrounded.
 
-Core calculations have unit tests that run in Node without React or a browser. Delivery now derives WBS parent totals in its pure application layer. Cost → Hours editing and cross-project capacity detection are implemented. Largest-remainder reconciliation remains deferred.
+Core calculations have unit tests that run in Node without React or a browser. Delivery now derives WBS parent totals in its pure application layer. Cost → Hours editing and cross-project capacity detection are implemented. Display-only largest-remainder reconciliation preserves WBS totals at the required unit precision.
 
 ## Workspace Architecture
 
@@ -280,7 +280,7 @@ npm run build
 
 ## Current Status
 
-Steps 8–10 are complete using the supplied official bootstrap. Delivery supports project/WBS planning, all four allocation units, global capacity warnings, authoritative People rate consumption, and live hosted rate invalidation.
+Steps 8–11 are complete using the supplied official bootstrap. Delivery supports project/WBS planning, all four allocation units, global capacity warnings, authoritative People rate consumption, and live hosted rate invalidation.
 
 Implemented:
 
@@ -324,7 +324,7 @@ Standalone Delivery reads its own origin's `remote-config.json`. The supplied `{
 
 The contracts package provides framework-independent document `CustomEvent` publication/subscription for the existing `people.rateChanged` name. The payload is only `{ employeeId }`, an invalidation signal, never copied rate history. People publishes immediately after successful rate add/edit/delete persistence; validation or persistence failures do not publish. Delivery subscribes at its hook boundary with teardown cleanup, refetches only the affected employee through the provider, and replaces that read-only snapshot. Older targeted responses cannot overwrite newer ones. No browser reload or remote reload occurs. Allocation hours and global capacity utilization stay unchanged; derived costs and subsequent Cost input conversions use refreshed rates. Cost saves also fetch the affected employee afresh before conversion.
 
-Monthly pricing reuses `priceAllocation`: spread hours evenly over Mon–Fri dates (no holidays), choose the latest rate with inclusive `validFrom` for each date, and sum unrounded daily costs. The next rate implicitly ends the previous one; any number of rate changes works. `costToHours` prices one hour with the same engine and divides entered EUR cost by that monthly blended rate, retaining full precision. Cost is never persisted. Parent cells remain read-only and sum individually priced descendant leaf allocations without double counting or parent records. EUR formatting is temporary normal monetary formatting; largest-remainder distribution and final precision reconciliation remain deferred.
+Monthly pricing reuses `priceAllocation`: spread hours evenly over Mon–Fri dates (no holidays), choose the latest rate with inclusive `validFrom` for each date, and sum unrounded daily costs. The next rate implicitly ends the previous one; any number of rate changes works. `costToHours` prices one hour with the same engine and divides entered EUR cost by that monthly blended rate, retaining full precision. Cost is never persisted. Parent cells remain read-only and sum individually priced descendant leaf allocations without double counting or parent records. EUR display uses two decimals and the presentation-only reconciliation described below.
 
 Complete rate coverage is required to display or edit Cost. Missing coverage (including only partly covered months) shows **Cost unavailable: no applicable rate.**, with no invented €0. Invalid or failed rate data also disables Cost and displays an explicit error; PM/Hours/% remain usable. When authority fails, previously loaded names/schedules are retained; on first-load failure only official bootstrap identities/schedules are used for hour planning, with rates emptied and an unavailable-authority message. Retry People data can recover the capability. A real zero-rate month displays €0 but disables Cost editing because the inverse has no unique answer; use the other units. Event transport is document-scoped, not cross-tab/cross-origin synchronization. Full Shell failure isolation is still deferred.
 
@@ -335,3 +335,13 @@ The supplied Adaeze March reference is verified using the actual seed despite re
 Capacity is `weeklyHours × Mon–Fri working days / 5`. Delivery reads all persisted allocations and groups canonical hours by employee/month across every project, providing a lookup independent of selected work-item totals. Utilization is `global hours / capacity × 100`, tested at full precision: exactly 100% is valid, 100.0001% warns. Valid edits save even above capacity; reductions and deletion clear resolved warnings. Rates never enter this calculation.
 
 Visible editable and read-only parent cells show utilization warnings stating that all projects are included, with accessible descriptions and text rather than color alone. Warning metadata is derived, never stored on allocations. The latest successful positive edit leaving a conflict owns that employee/month highlight for the current service session; later edits transfer ownership, deletion removes its highlight, and reload starts a new session. Historical seed data has no reliable edit ordering, so it gets global warnings without invented latest-edit metadata. Milan Brandt's June `alloc-050` and `alloc-073` each contribute 0.59 PM, totalling 207.68 / 176 = **118%** across two projects.
+
+## Display precision and reconciliation (Step 11)
+
+Allocations persist full-precision canonical hours. Display precision is Hours **2 dp**, PM **2 dp**, Percent **1 dp**, and Cost **2 dp** (EUR). Clean numeric inputs use ungrouped fixed decimals; read-only totals and currency labels use English locale formatting. Dirty inputs retain exactly what the user enters. Merely focusing or submitting an unchanged cell never saves its rounded display.
+
+Independently rounded siblings can disagree with the rounded parent. The pure `reconcileRoundedUnits` / `reconcileRoundedValues` utilities allocate lower integer display units, round the exact total, and distribute remaining units by largest fractional remainder, with original sibling order breaking ties (within floating-point tolerance). Each WBS root is rounded once. Its assigned units flow downward: intermediate parents distribute their inherited total among their children, so every displayed sibling group reconciles, even when an intermediate total differs from independent rounding. WBS sidebar Hours totals use the same hierarchy rule over the visible horizon. Grid reconciliation is per employee, month, and unit across the whole project tree, independent of which item is selected.
+
+Cost leaves are individually priced using authoritative effective-dated histories before aggregation and reconciliation. Missing/failed Cost stays unavailable and propagates to ancestors; genuine zero rates remain zero with ambiguous Cost editing disabled. This is presentation only: reconciled values never enter persistence, conversions, pricing, allocation identity, or capacity. Capacity warnings still use exact utilization >100%, even when the displayed percentage rounds to 100.0%.
+
+Reconciliation conserves **integer display units**; ordinary JavaScript decimal sums can still have binary floating-point residue. Precision is limited to 0–6 decimal places and safely representable integer display totals. Sibling order follows the existing WBS order; no random ordering or synthetic parent allocations are introduced.

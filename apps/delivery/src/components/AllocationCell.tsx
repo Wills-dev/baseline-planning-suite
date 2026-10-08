@@ -1,16 +1,16 @@
-import type { CapacityStatus } from '@baseline/domain';
+import type { AllocationUnit, CapacityStatus } from '@baseline/domain';
 import { useId, useRef, useState } from 'react';
 
-const displayNumber = new Intl.NumberFormat('en', { maximumFractionDigits: 4 });
-const displayCurrency = new Intl.NumberFormat('en', {
-  style: 'currency',
-  currency: 'EUR',
-});
+import {
+  formatDisplayValue,
+  formatInputValue,
+} from '../application/display-values';
+
 interface Props {
   value: number;
   capacityStatus?: CapacityStatus | undefined;
   latestEdit?: boolean;
-  monetary?: boolean;
+  unit?: AllocationUnit;
   unavailable?: string | undefined;
   editUnavailable?: string | undefined;
   label: string;
@@ -23,7 +23,7 @@ export function AllocationCell({
   value,
   capacityStatus,
   latestEdit,
-  monetary,
+  unit = 'Hours',
   unavailable,
   editUnavailable,
   label,
@@ -70,16 +70,14 @@ export function AllocationCell({
           aria-label={label}
           aria-describedby={overCapacity ? warningId : undefined}
         >
-          {monetary
-            ? displayCurrency.format(value)
-            : displayNumber.format(value)}
+          {formatDisplayValue(value, unit)}
         </output>
       ) : (
         <input
           type="number"
           min="0"
           step="any"
-          value={draft ?? String(value)}
+          value={draft ?? formatInputValue(value, unit)}
           disabled={disabled}
           aria-label={label}
           aria-describedby={`delivery-grid-help${overCapacity ? ` ${warningId}` : ''}`}
@@ -95,16 +93,16 @@ export function AllocationCell({
         />
       )}
       {editUnavailable && !unavailable && <span>{editUnavailable}</span>}
-      {monetary && !readOnly && !unavailable && !editUnavailable && (
+      {unit === 'Cost' && !readOnly && !unavailable && !editUnavailable && (
         <span className="delivery-cost-display">
-          {displayCurrency.format(value)}
+          {formatDisplayValue(value, unit)}
         </span>
       )}
       {overCapacity && (
         <span id={warningId} className="delivery-capacity-description">
           Over capacity:{' '}
-          {displayNumber.format(capacityStatus.utilizationPercent)}% allocated
-          across all projects.
+          {formatDisplayValue(capacityStatus.utilizationPercent, 'Percent')}%
+          allocated across all projects.
           {latestEdit && <strong> Latest edit saved; capacity warning.</strong>}
         </span>
       )}

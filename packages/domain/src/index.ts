@@ -25,3 +25,8 @@ export type {
 } from './pricing.js';
 
 export { parseDateOnly } from './date-only.js';
+export {
+  displayScale,
+  reconcileRoundedUnits,
+  reconcileRoundedValues,
+} from './display-rounding.js';

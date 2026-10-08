@@ -4,11 +4,9 @@ import { useMemo } from 'react';
 import type { Allocation, BreakdownItem, YearMonth } from '@baseline/domain';
 import type { PlanningPerson } from '../application/planning-people';
 import type { EditableUnit } from '../application/allocation-values';
-import {
-  priceCellHours,
-  hoursToDisplay,
-} from '../application/allocation-values';
-import { descendantLeafIds, isLeaf, workItemPath } from '../application/wbs';
+import { priceCellHours } from '../application/allocation-values';
+import { derivePlanningDisplay } from '../application/display-values';
+import { buildWbsTree, isLeaf, workItemPath } from '../application/wbs';
 import { AllocationCell } from './AllocationCell';
 
 const monthNames = [
@@ -57,40 +55,26 @@ export function StaffingGrid({
   const projectId = items.find((item) => item.id === selectedId)?.projectId;
   const leaf = isLeaf(selectedId, items);
   const path = workItemPath(selectedId, items);
-  const prices = useMemo(() => {
-    if (unit !== 'Cost') return new Map<string, number | null>();
-    const leaves = descendantLeafIds(selectedId, items);
-    const byPerson = new Map(
-      people.map((person) => [person.employeeId, person]),
-    );
+  const displays = useMemo(() => {
+    const tree = buildWbsTree(items);
     const result = new Map<string, number | null>();
-    // Price each descendant allocation, then sum: never store or price a parent record.
-    for (const allocation of allocations) {
-      if (!leaves.has(allocation.breakdownItemId)) continue;
-      const person = byPerson.get(allocation.employeeId);
-      if (!person) continue;
-      const key = capacityKey(person.employeeId, allocation.month);
-      const priced = priceCellHours(allocation.hours, person, allocation.month);
-      const existing = result.get(key);
-      result.set(
-        key,
-        existing === null || priced.costEUR === null
-          ? null
-          : (existing ?? 0) + priced.costEUR,
-      );
+    for (const person of people) {
+      for (const month of planningMonths) {
+        const values = derivePlanningDisplay(
+          tree,
+          allocations,
+          person,
+          month,
+          unit,
+        );
+        result.set(
+          capacityKey(person.employeeId, month),
+          values.get(selectedId) ?? null,
+        );
+      }
     }
     return result;
-  }, [selectedId, items, allocations, people, unit]);
-  const totals = useMemo(() => {
-    const leaves = descendantLeafIds(selectedId, items);
-    const cells = new Map<string, number>();
-    for (const allocation of allocations) {
-      if (!leaves.has(allocation.breakdownItemId)) continue;
-      const key = capacityKey(allocation.employeeId, allocation.month);
-      cells.set(key, (cells.get(key) ?? 0) + allocation.hours);
-    }
-    return cells;
-  }, [selectedId, items, allocations]);
+  }, [selectedId, items, allocations, people, planningMonths, unit]);
   return (
     <section aria-labelledby="delivery-grid-heading">
       <h2 id="delivery-grid-heading">Staffing allocations</h2>
@@ -133,20 +117,15 @@ export function StaffingGrid({
                     </span>
                   </th>
                   {planningMonths.map((month) => {
-                    const hours =
-                      totals.get(capacityKey(person.employeeId, month)) ?? 0;
                     const key = capacityKey(person.employeeId, month);
                     const priced =
                       unit === 'Cost'
                         ? priceCellHours(0, person, month)
                         : undefined;
-                    const cost = prices.get(key);
+                    const display = displays.get(key);
                     const unavailable =
-                      priced?.costEUR === null || cost === null;
-                    const value =
-                      unit === 'Cost'
-                        ? (cost ?? 0)
-                        : hoursToDisplay(hours, unit, person, month);
+                      priced?.costEUR === null || display === null;
+                    const value = display ?? 0;
                     const status = capacityStatuses.get(key);
                     const latest = latestCapacityEdits.get(key);
                     const latestEdit =
@@ -163,7 +142,7 @@ export function StaffingGrid({
                           value={value}
                           capacityStatus={status}
                           latestEdit={latestEdit}
-                          monetary={unit === 'Cost'}
+                          unit={unit}
                           unavailable={
                             unavailable
                               ? priced?.unavailable ||
