@@ -43,7 +43,7 @@ Provides the searchable employee register, employee details, weekly hours/roles,
 
 Owns the delivery-planning domain.
 
-Provides project selection, three-level WBS editing, leaf staffing allocations, and derived parent totals. Cross-project capacity warnings and authoritative cost views remain deferred.
+Provides project selection, three-level WBS editing, leaf staffing allocations, and derived parent totals. Cross-project capacity warnings include all persisted allocations; authoritative cost views remain deferred.
 
 ### Shared Packages
 
@@ -85,7 +85,7 @@ Pricing returns `totalCostEUR`, `hoursPerWorkingDay`, `missingRateDays`, and `da
 
 Reference: **0.50 PM in March 2026 for Adaeze Okafor (40h/week)** gives 22 working days, **176 monthly hours**, **88 allocation hours**, and **50% capacity**. With €80/hour from 2025-01-01 and €95/hour from 2026-03-12, 8 days at the old rate and 14 at the new rate yield **€7,880**, with a blended rate displayed as **€89.5455/hour**. The underlying blended value remains unrounded.
 
-Core calculations have unit tests that run in Node without React or a browser. Delivery now derives WBS parent totals in its pure application layer. Cost → Hours editing, capacity conflict detection, and largest-remainder reconciliation remain unimplemented.
+Core calculations have unit tests that run in Node without React or a browser. Delivery now derives WBS parent totals in its pure application layer. Cost → Hours editing and largest-remainder reconciliation remain unimplemented.
 
 ## Workspace Architecture
 
@@ -158,7 +158,7 @@ People owns mutable employee/rate state; Delivery owns mutable projects/WBS/allo
 
 After this migration, reloads preserve additions, edits, and deletions, including empty stores. A fresh empty database seeds once. Unmarked nonempty data is preserved and marked without backfilling. An unrecognized version is rejected and requires an explicit future migration; changing JSON metadata never silently resets a versioned database. No manual DevTools deletion is needed for the known legacy fixture marker.
 
-Browser storage is origin-scoped: standalone apps on separate ports have separate storage from hosted apps executing at the Shell origin. Cross-application authoritative data retrieval, `people.rateChanged` transport/publication, and live synchronization are not implemented. People and Delivery planning are implemented; rate synchronization and cross-project capacity warnings remain deferred.
+Browser storage is origin-scoped: standalone apps on separate ports have separate storage from hosted apps executing at the Shell origin. Cross-application authoritative data retrieval, `people.rateChanged` transport/publication, and live synchronization are not implemented. People and Delivery planning are implemented; rate synchronization remains deferred.
 
 ## People Register and Rate Editing
 
@@ -280,7 +280,7 @@ npm run build
 
 ## Current Status
 
-Step 8 is complete using the supplied official bootstrap. Delivery supports project selection, WBS editing, leaf allocations, and parent totals; Cost remains unavailable until authoritative People integration.
+Steps 8 and 9 are complete using the supplied official bootstrap. Delivery supports project selection, WBS editing, leaf allocations, and parent totals; Cost remains unavailable until authoritative People integration.
 
 Implemented:
 
@@ -309,9 +309,17 @@ Implemented:
 Not yet implemented:
 
 - Authoritative Delivery cost views and Cost → Hours editing
-- Cross-project capacity warnings and largest-remainder reconciliation
+- Largest-remainder reconciliation
 - Cross-application event transport, authoritative data retrieval, and live recalculation
 - Failure isolation
 - Docker/container configuration
 
 These capabilities will be introduced incrementally while maintaining clear ownership between Shell, People, and Delivery.
+
+### Cross-project capacity (Step 9)
+
+Monthly capacity is `weeklyHours × Mon–Fri working days / 5`, using the existing domain calendar engine. Delivery reads all persisted allocations once per project load and groups canonical hours by employee and month, across every project and work item. The domain returns a capacity lookup; the service passes it through the existing hook to the grid. Selected work-item values and read-only parent rollups remain separate from global utilization.
+
+Utilization is `total canonical hours / monthly capacity × 100`. Exactly 100% is valid; values above 100% (including 100.0001%) warn using full precision before display formatting. Valid edits always save, even above capacity. Reductions and zero/deletion recompute from persistence and clear warnings at or below 100%. Unit changes never affect capacity or write allocations. Cost remains unavailable; Step 10 authoritative People integration is not implemented.
+
+Warnings are derived, never stored on allocation records. Every visible over-capacity employee/month cell shows utilization text stating that all projects are included, also associated with its input or read-only output as an accessible description. Successful edits that leave a conflict highlight the latest edited cell for that employee/month in the current service session; a subsequent edit transfers ownership. Deleting that cell removes its highlight even if another allocation still leaves a global conflict. Reloading starts a new session. Historical official-seed conflicts have no reliable edit ordering, so they receive utilization warnings without invented latest-edit metadata. For example, Milan Brandt's June 2026 allocations `alloc-050` and `alloc-073` each contain 0.59 PM (103.84 hours), giving 207.68 / 176 = 118% across Ledger Consolidation and Client Portal Rebuild.

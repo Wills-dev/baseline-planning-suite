@@ -167,3 +167,20 @@
     padding: 16px;
   }
 }
+
+.delivery-capacity-warning,
+.delivery-capacity-latest {
+  background: #fff6df;
+  padding: 0.25rem;
+}
+.delivery-capacity-latest {
+  outline: 2px solid #916300;
+  outline-offset: -2px;
+}
+.delivery-capacity-description {
+  display: block;
+  margin-top: 0.3rem;
+  max-width: 12rem;
+  font-size: 0.75rem;
+  color: #684800;
+}

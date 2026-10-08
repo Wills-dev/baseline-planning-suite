@@ -1,3 +1,4 @@
+import { capacityKey } from '@baseline/domain';
 import { describe, expect, test, vi } from 'vitest';
 import type { DeliveryRepository } from '../persistence/delivery-repository';
 import { createDeliveryFixtures } from '../persistence/fixtures';
@@ -371,4 +372,119 @@ test('initialization exposes the bootstrap horizon as application configuration'
   expect(planningMonths).toHaveLength(12);
   expect(planningMonths[0]).toBe('2026-04');
   expect(planningMonths.at(-1)).toBe('2027-03');
+});
+
+// June's supplied emp-003 overlap is 0.59 PM in each of prj-1/prj-3.
+test('official historical overlap uses all persisted projects without invented edit metadata', async () => {
+  const { repository, service } = setup();
+  const all = vi.spyOn(repository, 'listAllocations');
+  const selected = vi.spyOn(repository, 'listProjectAllocations');
+  const first = await service.loadProject('prj-1');
+  const key = capacityKey('emp-003', '2026-06');
+  expect(all).toHaveBeenCalled();
+  expect(selected).not.toHaveBeenCalled();
+  expect(first.capacityStatuses.get(key)).toMatchObject({
+    capacityHours: 176,
+    utilizationPercent: 118,
+    overAllocated: true,
+  });
+  expect(first.capacityStatuses.get(key)?.allocatedHours).toBeCloseTo(
+    207.68,
+    12,
+  );
+  expect(first.latestCapacityEdits.size).toBe(0);
+  expect(
+    (await service.loadProject('prj-3')).capacityStatuses.get(key),
+  ).toEqual(first.capacityStatuses.get(key));
+});
+
+test('valid saves warn, transfer session ownership, reduce/delete and clear from persisted hours', async () => {
+  const { repository, service } = setup();
+  // Small explicit capacity scenario over the real hierarchy, without modifying the seed.
+  for (const allocation of await repository.listAllocations())
+    await repository.deleteAllocation(allocation.id);
+  await repository.saveAllocation({
+    id: 'other-project',
+    projectId: 'prj-3',
+    breakdownItemId: 'wbs-061',
+    employeeId: 'emp-003',
+    month: '2026-06',
+    hours: 132,
+  });
+  const key = capacityKey('emp-003', '2026-06');
+  let data = await service.saveCell(
+    'prj-1',
+    'wbs-012',
+    'emp-003',
+    '2026-06',
+    '88',
+    'Hours',
+  );
+  expect(data.capacityStatuses.get(key)).toMatchObject({
+    allocatedHours: 220,
+    utilizationPercent: 125,
+    overAllocated: true,
+  });
+  expect(data.latestCapacityEdits.get(key)).toEqual({
+    projectId: 'prj-1',
+    breakdownItemId: 'wbs-012',
+  });
+  expect((await repository.listProjectAllocations('prj-1'))[0]?.hours).toBe(88);
+  data = await service.saveCell(
+    'prj-3',
+    'wbs-061',
+    'emp-003',
+    '2026-06',
+    '132',
+    'Hours',
+  );
+  expect(data.latestCapacityEdits.get(key)).toEqual({
+    projectId: 'prj-3',
+    breakdownItemId: 'wbs-061',
+  });
+  expect(
+    (await service.loadProject('prj-1')).capacityStatuses.get(key),
+  ).toEqual(data.capacityStatuses.get(key));
+  data = await service.saveCell(
+    'prj-1',
+    'wbs-012',
+    'emp-003',
+    '2026-06',
+    '44',
+    'Hours',
+  );
+  expect(data.capacityStatuses.get(key)).toMatchObject({
+    utilizationPercent: 100,
+    overAllocated: false,
+  });
+  expect(data.latestCapacityEdits.has(key)).toBe(false);
+  await service.saveCell(
+    'prj-1',
+    'wbs-012',
+    'emp-003',
+    '2026-06',
+    '88',
+    'Hours',
+  );
+  data = await service.saveCell(
+    'prj-1',
+    'wbs-012',
+    'emp-003',
+    '2026-06',
+    '0',
+    'Hours',
+  );
+  expect(data.capacityStatuses.get(key)).toMatchObject({
+    utilizationPercent: 75,
+    overAllocated: false,
+  });
+  expect(data.latestCapacityEdits.has(key)).toBe(false);
+  expect((await repository.listProjectAllocations('prj-1')).length).toBe(0);
+  expect((await repository.listAllocations())[0]).not.toHaveProperty(
+    'overAllocated',
+  );
+  expect(
+    (await createDeliveryService(repository, provider).loadProject('prj-3'))
+      .latestCapacityEdits.size,
+  ).toBe(0);
 });

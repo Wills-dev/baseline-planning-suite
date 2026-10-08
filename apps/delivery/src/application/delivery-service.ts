@@ -1,5 +1,7 @@
+import { calculateCapacityStatuses, capacityKey } from '@baseline/domain';
 import type {
   Allocation,
+  CapacityStatus,
   BreakdownItem,
   BreakdownItemType,
   YearMonth,
@@ -17,6 +19,11 @@ export interface ProjectPlanningData {
   projectId: string;
   items: BreakdownItem[];
   allocations: Allocation[];
+  capacityStatuses: ReadonlyMap<string, CapacityStatus>;
+  latestCapacityEdits: ReadonlyMap<
+    string,
+    { projectId: string; breakdownItemId: string }
+  >;
 }
 
 export interface WorkItemInput {
@@ -32,24 +39,48 @@ export function createDeliveryService(
   configuration: PlanningConfiguration = bootstrapPlanningConfiguration,
 ) {
   const { planningMonths } = configuration;
+  // Session-only edit order: historical allocations carry no warning metadata.
+  const latestCapacityEdits = new Map<
+    string,
+    { projectId: string; breakdownItemId: string }
+  >();
   async function loadProject(projectId: string): Promise<ProjectPlanningData> {
     if (!(await repository.getProject(projectId)))
       throw new PlanningInputError('The selected project no longer exists.');
-    const [items, allocations] = await Promise.all([
+    const [items, allAllocations, people] = await Promise.all([
       repository.listBreakdownItems(projectId),
-      repository.listProjectAllocations(projectId),
+      repository.listAllocations(),
+      peopleProvider.listPeople(),
     ]);
+    const allocations = allAllocations.filter(
+      (allocation) => allocation.projectId === projectId,
+    );
     buildWbsTree(items);
     if (
-      allocations.some(
+      allAllocations.some(
         (allocation) =>
           !Number.isFinite(allocation.hours) || allocation.hours < 0,
       )
     )
       throw new PlanningInputError(
-        'This project contains invalid allocation hours. Correct the stored record before planning.',
+        'Delivery contains invalid allocation hours. Correct the stored record before planning.',
       );
-    return { projectId, items, allocations };
+    const capacityStatuses = calculateCapacityStatuses(
+      people,
+      planningMonths,
+      allAllocations,
+    );
+    for (const key of latestCapacityEdits.keys()) {
+      if (!capacityStatuses.get(key)?.overAllocated)
+        latestCapacityEdits.delete(key);
+    }
+    return {
+      projectId,
+      items,
+      allocations,
+      capacityStatuses,
+      latestCapacityEdits: new Map(latestCapacityEdits),
+    };
   }
   return {
     initialize: async () => {
@@ -139,6 +170,10 @@ export function createDeliveryService(
           hours,
         });
       }
+      const key = capacityKey(employeeId, month);
+      if (hours > 0)
+        latestCapacityEdits.set(key, { projectId, breakdownItemId: leafId });
+      else latestCapacityEdits.delete(key);
       return loadProject(projectId);
     },
   };

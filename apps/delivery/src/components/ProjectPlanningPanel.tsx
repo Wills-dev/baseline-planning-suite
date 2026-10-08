@@ -72,6 +72,8 @@ export function ProjectPlanningPanel({
         {selected ? (
           <StaffingGrid
             selectedId={selectedId}
+            capacityStatuses={data.capacityStatuses}
+            latestCapacityEdits={data.latestCapacityEdits}
             items={data.items}
             allocations={data.allocations}
             people={people}
