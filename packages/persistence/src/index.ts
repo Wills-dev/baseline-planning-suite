@@ -10,6 +10,10 @@ export interface DatabaseOptions<T> {
   name: string;
   version: number;
   stores: readonly StoreSchema<T>[];
+  /** Bootstrap identity, independent of IndexedDB schema version. */
+  seedVersion?: string;
+  /** One-time development reset of all owner stores when the old unversioned marker exists. */
+  replaceLegacySeed?: boolean;
   seed: () => { [K in keyof T]: readonly T[K][] };
 }
 
@@ -115,21 +119,45 @@ export function createDatabase<T extends RecordsWithIds<T>>(
     try {
       const metadata = transaction.objectStore(metadataStore);
       const marker: unknown = await requestResult(metadata.get(seedMarker));
-      if (!marker) {
+      const version =
+        typeof marker === 'object' && marker !== null && 'version' in marker
+          ? marker.version
+          : undefined;
+      const migrateLegacy = Boolean(
+        marker &&
+        version === undefined &&
+        options.replaceLegacySeed &&
+        options.seedVersion,
+      );
+      if (
+        marker &&
+        version !== undefined &&
+        options.seedVersion &&
+        version !== options.seedVersion
+      )
+        throw new Error(
+          'Unsupported fixture version; an explicit migration is required',
+        );
+      if (!marker || migrateLegacy) {
         const counts = await Promise.all(
           names.map((name) =>
             requestResult(transaction.objectStore(name).count()),
           ),
         );
         // Preserve pre-existing data even if its marker is missing; never overwrite edits.
-        if (counts.every((count) => count === 0)) {
+        if (migrateLegacy || counts.every((count) => count === 0)) {
           const fixtures = options.seed();
+          if (migrateLegacy)
+            for (const name of names) transaction.objectStore(name).clear();
           for (const name of names) {
             for (const record of fixtures[name])
               transaction.objectStore(name).add(record);
           }
         }
-        metadata.put({ id: seedMarker });
+        metadata.put({
+          id: seedMarker,
+          ...(options.seedVersion ? { version: options.seedVersion } : {}),
+        });
       }
       await done;
     } catch (error) {

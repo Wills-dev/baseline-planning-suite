@@ -38,11 +38,13 @@ describe('People search and input validation', () => {
   test('searches case-insensitively by employee name and role without mutating input', () => {
     const employees = createPeopleFixtures().employees;
     expect(
-      searchEmployees(employees, '  a. oKAFOr  ').map(
+      searchEmployees(employees, '  Adaeze oKAFOr  ').map(
         (employee) => employee.id,
       ),
-    ).toEqual(['employee-01']);
-    expect(searchEmployees(employees, 'FRONTEND ENGINEER')).toHaveLength(12);
+    ).toEqual(['emp-001']);
+    expect(searchEmployees(employees, 'FRONTEND ENGINEER')).toEqual(
+      employees.filter((employee) => employee.role === 'Frontend Engineer'),
+    );
     expect(searchEmployees(employees, 'no-such-person')).toEqual([]);
     expect(searchEmployees(employees, '')).toHaveLength(60);
     expect(employees).toHaveLength(60);
@@ -84,14 +86,12 @@ describe('People search and input validation', () => {
 
   test('rejects duplicate dates but permits an edited record to retain its own date', () => {
     const rates = createPeopleFixtures().rateRecords.filter(
-      (rate) => rate.employeeId === 'employee-01',
+      (rate) => rate.employeeId === 'emp-001',
     );
     const input = { validFrom: '2026-03-12', hourlyCostEUR: '100' };
     expect(() => validateRateInput(input, rates)).toThrow('already has a rate');
-    expect(
-      validateRateInput(input, rates, 'employee-01-rate-2').hourlyCostEUR,
-    ).toBe(100);
-    expect(() => validateRateInput(input, rates, 'employee-01-rate-1')).toThrow(
+    expect(validateRateInput(input, rates, 'rate-002').hourlyCostEUR).toBe(100);
+    expect(() => validateRateInput(input, rates, 'rate-001')).toThrow(
       'already has a rate',
     );
   });
@@ -104,7 +104,7 @@ describe('People repository-facing orchestration', () => {
     expect(await service.listEmployees()).toHaveLength(60);
     expect(repository.initialize).toHaveBeenCalledOnce();
     expect(
-      (await service.listRateHistory('employee-01')).map((rate) => [
+      (await service.listRateHistory('emp-001')).map((rate) => [
         rate.validFrom,
         rate.hourlyCostEUR,
       ]),
@@ -117,29 +117,29 @@ describe('People repository-facing orchestration', () => {
   test('adds, edits, and deletes through repository operations, returning refreshed history', async () => {
     const repository = memoryRepository();
     const service = createPeopleService(repository, () => 'user-created-rate');
-    const added = await service.saveRate('employee-01', {
+    const added = await service.saveRate('emp-001', {
       validFrom: '2027-01-01',
       hourlyCostEUR: '101.12345',
     });
     expect(added).toHaveLength(3);
     expect(await repository.getRateRecord('user-created-rate')).toMatchObject({
-      employeeId: 'employee-01',
+      employeeId: 'emp-001',
       validFrom: '2027-01-01',
       hourlyCostEUR: 101.12345,
     });
     const edited = await service.saveRate(
-      'employee-01',
+      'emp-001',
       { validFrom: '2027-02-01', hourlyCostEUR: '102' },
       'user-created-rate',
     );
     expect(edited.at(-1)).toMatchObject({
       id: 'user-created-rate',
-      employeeId: 'employee-01',
+      employeeId: 'emp-001',
       validFrom: '2027-02-01',
       hourlyCostEUR: 102,
     });
     expect(
-      await service.deleteRate('employee-01', 'user-created-rate'),
+      await service.deleteRate('emp-001', 'user-created-rate'),
     ).toHaveLength(2);
     expect(await repository.getRateRecord('user-created-rate')).toBeUndefined();
   });
@@ -148,22 +148,22 @@ describe('People repository-facing orchestration', () => {
     const repository = memoryRepository();
     const service = createPeopleService(repository, () => 'new-rate');
     await expect(
-      service.saveRate('employee-01', {
+      service.saveRate('emp-001', {
         validFrom: '2026-03-12',
         hourlyCostEUR: '100',
       }),
     ).rejects.toThrow('already has a rate');
     await expect(
       service.saveRate(
-        'employee-01',
+        'emp-001',
         { validFrom: '2025-01-01', hourlyCostEUR: '100' },
-        'employee-01-rate-2',
+        'rate-002',
       ),
     ).rejects.toThrow('already has a rate');
     expect(await repository.getRateRecord('new-rate')).toBeUndefined();
-    expect(
-      (await repository.getRateRecord('employee-01-rate-2'))?.hourlyCostEUR,
-    ).toBe(95);
+    expect((await repository.getRateRecord('rate-002'))?.hourlyCostEUR).toBe(
+      95,
+    );
   });
 
   test('requires an existing employee and prevents cross-employee edits or deletions', async () => {
@@ -177,15 +177,15 @@ describe('People repository-facing orchestration', () => {
     ).rejects.toThrow('employee no longer exists');
     await expect(
       service.saveRate(
-        'employee-02',
+        'emp-002',
         { validFrom: '2027-01-01', hourlyCostEUR: '95' },
-        'employee-01-rate-2',
+        'rate-002',
       ),
     ).rejects.toThrow('selected employee');
-    await expect(
-      service.deleteRate('employee-02', 'employee-01-rate-2'),
-    ).rejects.toThrow('selected employee');
-    expect(await repository.getRateRecord('employee-01-rate-2')).toBeDefined();
+    await expect(service.deleteRate('emp-002', 'rate-002')).rejects.toThrow(
+      'selected employee',
+    );
+    expect(await repository.getRateRecord('rate-002')).toBeDefined();
   });
 
   test('propagates persistence failures for the page to present, without claiming success', async () => {
@@ -195,7 +195,7 @@ describe('People repository-facing orchestration', () => {
     );
     const service = createPeopleService(repository, () => 'new-rate');
     await expect(
-      service.saveRate('employee-01', {
+      service.saveRate('emp-001', {
         validFrom: '2027-01-01',
         hourlyCostEUR: '100',
       }),

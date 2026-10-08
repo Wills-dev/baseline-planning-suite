@@ -18,3 +18,5 @@ export type {
   DailyAllocationPrice,
   AllocationPricingResult,
 } from './pricing.js';
+
+export { parseDateOnly } from './date-only.js';

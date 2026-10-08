@@ -1,3 +1,4 @@
+import { officialSeedVersion } from '../../../../fixtures/official-seed';
 import type { Employee, RateRecord } from '@baseline/domain';
 import { createDatabase } from '@baseline/persistence';
 import { createPeopleFixtures } from './fixtures';
@@ -23,6 +24,8 @@ export function createPeopleRepository(): PeopleRepository {
   const database = createDatabase<PeopleStores>({
     name: 'baseline-planning-people',
     version: 1,
+    seedVersion: officialSeedVersion,
+    replaceLegacySeed: true,
     stores: [
       { name: 'employees' },
       {
