@@ -1,8 +1,6 @@
-import { lazy, Suspense, useState } from 'react';
+import { useState } from 'react';
+import { RemoteOutlet } from './RemoteOutlet';
 import { loadDeliveryPage, loadPeoplePage } from './remote-pages';
-
-const PeoplePage = lazy(loadPeoplePage);
-const DeliveryPage = lazy(loadDeliveryPage);
 
 export function App() {
   const [visited, setVisited] = useState({ people: false, delivery: false });
@@ -31,18 +29,17 @@ export function App() {
           Delivery
         </button>
       </nav>
-      <Suspense fallback={<p>Loading application…</p>}>
-        {visited.people && (
-          <div hidden={page !== 'people'}>
-            <PeoplePage />
-          </div>
-        )}
-        {visited.delivery && (
-          <div hidden={page !== 'delivery'}>
-            <DeliveryPage />
-          </div>
-        )}
-      </Suspense>
+
+      {visited.people && (
+        <div hidden={page !== 'people'}>
+          <RemoteOutlet name="People" load={loadPeoplePage} />
+        </div>
+      )}
+      {visited.delivery && (
+        <div hidden={page !== 'delivery'}>
+          <RemoteOutlet name="Delivery" load={loadDeliveryPage} />
+        </div>
+      )}
     </main>
   );
 }

@@ -9,68 +9,111 @@ import { loadRemote, registerRemotes } from '@module-federation/runtime';
 interface RemotePageModule {
   default: ComponentType;
 }
+type RemoteName = 'people' | 'delivery';
 
-interface RemoteLocations {
-  people: string;
-  delivery: string;
-}
+let configuration: Promise<unknown> | undefined;
+const registered = new Map<RemoteName, string>();
+const attempts: Record<RemoteName, number> = { people: 0, delivery: 0 };
 
-function isRemoteLocations(value: unknown): value is RemoteLocations {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'people' in value &&
-    typeof value.people === 'string' &&
-    'delivery' in value &&
-    typeof value.delivery === 'string'
-  );
-}
-
-let registration: Promise<void> | undefined;
-
-function registerConfiguredRemotes(): Promise<void> {
-  registration ??= fetch(`${import.meta.env.BASE_URL}remote-config.json`, {
+function readConfiguration(): Promise<unknown> {
+  if (configuration) return configuration;
+  const request = fetch(`${import.meta.env.BASE_URL}remote-config.json`, {
     cache: 'no-store',
-  }).then(async (response) => {
-    if (!response.ok) throw new Error('Could not load remote configuration');
-    const config: unknown = await response.json();
-    if (!isRemoteLocations(config))
-      throw new Error('Invalid remote configuration');
-    registerRemotes([
-      { name: 'people', entry: config.people, type: 'module' },
-      { name: 'delivery', entry: config.delivery, type: 'module' },
-    ]);
-  });
-  return registration;
+  })
+    .then(async (response) => {
+      if (!response.ok) throw new Error('Could not load remote configuration');
+      const value: unknown = await response.json();
+      if (typeof value !== 'object' || value === null || Array.isArray(value))
+        throw new Error('Invalid remote configuration');
+      return value;
+    })
+    .catch((error: unknown) => {
+      if (configuration === request) configuration = undefined;
+      throw error;
+    });
+  configuration = request;
+  return request;
 }
 
-export async function loadPeoplePage(): Promise<RemotePageModule> {
-  await registerConfiguredRemotes();
+/** Validate/register only the requested remote, independently of its sibling. */
+async function registerConfiguredRemote(
+  name: RemoteName,
+  retry = false,
+): Promise<void> {
+  if (retry) configuration = undefined;
+  const config = await readConfiguration();
+  const value = (config as Record<string, unknown>)[name];
+  if (typeof value !== 'string' || !value.trim())
+    throw new Error(`Missing ${name} remote URL`);
+  let entry: URL;
+  try {
+    entry = new URL(value, globalThis.location?.href);
+  } catch {
+    throw new Error(`Invalid ${name} remote URL`);
+  }
+  if (!['http:', 'https:'].includes(entry.protocol))
+    throw new Error(`Invalid ${name} remote URL`);
+  if (retry) {
+    // A new entry URL also avoids the browser's cached rejected ESM import.
+    entry.searchParams.set('baseline-retry', String(++attempts[name]));
+  }
+  const url = entry.href;
+  if (registered.get(name) !== url) {
+    registerRemotes([{ name, entry: url, type: 'module' }], {
+      force: registered.has(name),
+    });
+    registered.set(name, url);
+  }
+}
+
+function assertPage<T extends { default: unknown }>(
+  module: T | null,
+  name: string,
+): asserts module is T {
+  if (
+    !module ||
+    !module.default ||
+    !['function', 'object'].includes(typeof module.default)
+  )
+    throw new Error(`${name} was not returned by the remote`);
+}
+
+export async function loadPeoplePage(retry = false): Promise<RemotePageModule> {
+  await registerConfiguredRemote('people', retry);
   const module = await loadRemote<RemotePageModule>('people/PeoplePage');
-  if (!module) throw new Error('PeoplePage was not returned by the remote');
+  assertPage(module, 'PeoplePage');
   return module;
 }
 
+let capabilityFailed = false;
 export async function loadPlanningPeopleCapability(): Promise<PlanningPeopleCapability> {
-  await registerConfiguredRemotes();
-  const capability = await loadRemote<PlanningPeopleCapability>(
-    'people/PlanningRates',
-  );
-  if (
-    !capability ||
-    typeof capability.listPlanningPeople !== 'function' ||
-    typeof capability.getPlanningPerson !== 'function'
-  )
-    throw new Error('People planning capability unavailable');
-  return capability;
+  try {
+    await registerConfiguredRemote('people', capabilityFailed);
+    const capability = await loadRemote<PlanningPeopleCapability>(
+      'people/PlanningRates',
+    );
+    if (
+      !capability ||
+      typeof capability.listPlanningPeople !== 'function' ||
+      typeof capability.getPlanningPerson !== 'function'
+    )
+      throw new Error('People planning capability unavailable');
+    capabilityFailed = false;
+    return capability;
+  } catch (error) {
+    capabilityFailed = true;
+    throw error;
+  }
 }
 
-export async function loadDeliveryPage(): Promise<RemotePageModule> {
-  await registerConfiguredRemotes();
+export async function loadDeliveryPage(
+  retry = false,
+): Promise<RemotePageModule> {
+  await registerConfiguredRemote('delivery', retry);
   const module = await loadRemote<{
     default: ComponentType<{ loadPlanningPeople?: PlanningPeopleLoader }>;
   }>('delivery/DeliveryPage');
-  if (!module) throw new Error('DeliveryPage was not returned by the remote');
+  assertPage(module, 'DeliveryPage');
   const Page = module.default;
   return {
     default: function HostedDeliveryPage() {
