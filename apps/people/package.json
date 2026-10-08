@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "@baseline/domain": "0.0.0",
+    "@baseline/persistence": "0.0.0"
   }
 }
