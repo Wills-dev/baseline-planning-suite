@@ -56,3 +56,26 @@ export function blendedHourlyRate(
   assertNonNegativeFinite(allocationHours, 'Allocation hours');
   return allocationHours === 0 ? 0 : totalCostEUR / allocationHours;
 }
+
+/** Invert the same evenly distributed working-day pricing model, without rounding hours. */
+export function costToHours(
+  costEUR: number,
+  employeeId: string,
+  month: Allocation['month'],
+  rates: readonly RateRecord[],
+): number {
+  assertNonNegativeFinite(costEUR, 'Allocation cost');
+  const unitPrice = priceAllocation(
+    { id: '', projectId: '', breakdownItemId: '', employeeId, month, hours: 1 },
+    rates,
+  );
+  if (unitPrice.missingRateDays.length)
+    throw new RangeError('Cost unavailable: no applicable rate.');
+  if (unitPrice.totalCostEUR === 0)
+    throw new RangeError(
+      'Cost editing unavailable: monthly rate is zero. Use Hours, PM or % capacity.',
+    );
+  const hours = costEUR / unitPrice.totalCostEUR;
+  assertNonNegativeFinite(hours, 'Converted allocation hours');
+  return hours;
+}

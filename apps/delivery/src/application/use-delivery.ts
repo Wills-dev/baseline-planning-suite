@@ -3,17 +3,19 @@ import type { Project, YearMonth } from '@baseline/domain';
 import { createDeliveryRepository } from '../persistence/delivery-repository';
 import { createDeliveryService } from './delivery-service';
 import type { ProjectPlanningData, WorkItemInput } from './delivery-service';
-import { createFixturePlanningPeopleProvider } from './planning-people';
+import { createRuntimePlanningPeopleProvider } from '../integration/planning-people-provider';
+import { subscribePeopleRateChanged } from '@baseline/contracts';
+import type { PlanningPeopleLoader } from '@baseline/contracts';
 import type { PlanningPerson } from './planning-people';
 import type { EditableUnit } from './allocation-values';
 import { PlanningInputError } from './planning-error';
 import { createLatestProjectRequest } from './latest-project-request';
 
-export function useDelivery() {
+export function useDelivery(loadPlanningPeople?: PlanningPeopleLoader) {
   const [service] = useState(() =>
     createDeliveryService(
       createDeliveryRepository(),
-      createFixturePlanningPeopleProvider(),
+      createRuntimePlanningPeopleProvider(loadPlanningPeople),
     ),
   );
   const [requests] = useState(createLatestProjectRequest);
@@ -22,6 +24,7 @@ export function useDelivery() {
   const [planningMonths, setPlanningMonths] = useState<readonly YearMonth[]>(
     [],
   );
+  const [peopleStatus, setPeopleStatus] = useState('');
   const [initialLoading, setInitialLoading] = useState(true);
   const [initialError, setInitialError] = useState('');
   const [projectId, setProjectId] = useState('');
@@ -43,6 +46,7 @@ export function useDelivery() {
         if (!cancelled) {
           setProjects(result.projects);
           setPeople(result.people);
+          setPeopleStatus(result.peopleStatus);
           setPlanningMonths(result.planningMonths);
           setInitialLoading(false);
         }
@@ -55,7 +59,30 @@ export function useDelivery() {
           setInitialLoading(false);
         }
       });
+    const unsubscribe = subscribePeopleRateChanged(({ employeeId }) => {
+      void service
+        .refreshPerson(employeeId)
+        .then((result) => {
+          if (!cancelled) {
+            setPeople(result);
+            setPeopleStatus(service.peopleStatus());
+            setData((previous) =>
+              previous
+                ? {
+                    ...previous,
+                    capacityStatuses: service.currentCapacityStatuses(),
+                  }
+                : previous,
+            );
+          }
+        })
+        .catch(() => {
+          if (!cancelled)
+            setPeopleStatus('People rate data unavailable. Retry People data.');
+        });
+    });
     return () => {
+      unsubscribe();
       cancelled = true;
       active.current = false;
       requests.cancel();
@@ -70,6 +97,7 @@ export function useDelivery() {
       if (active.current) {
         setProjects(result.projects);
         setPeople(result.people);
+        setPeopleStatus(result.peopleStatus);
         setPlanningMonths(result.planningMonths);
       }
     } catch {
@@ -94,7 +122,11 @@ export function useDelivery() {
     if (!id) return;
     try {
       const result = await service.loadProject(id);
-      if (active.current && requests.isCurrent(request)) setData(result);
+      if (active.current && requests.isCurrent(request)) {
+        setData(result);
+        setPeople(service.currentPeople());
+        setPeopleStatus(service.peopleStatus());
+      }
     } catch (error) {
       if (active.current && requests.isCurrent(request))
         setProjectError(
@@ -122,6 +154,8 @@ export function useDelivery() {
       const result = await operation();
       if (active.current && requests.isCurrent(request)) {
         setData(result);
+        setPeople(service.currentPeople());
+        setPeopleStatus(service.peopleStatus());
         setNotice(success);
       }
       return true;
@@ -142,6 +176,22 @@ export function useDelivery() {
   return {
     projects,
     people,
+    peopleStatus,
+    retryPeople: async () => {
+      const result = await service.retryPeople();
+      if (active.current) {
+        setPeople(result);
+        setPeopleStatus(service.peopleStatus());
+        setData((previous) =>
+          previous
+            ? {
+                ...previous,
+                capacityStatuses: service.currentCapacityStatuses(),
+              }
+            : previous,
+        );
+      }
+    },
     planningMonths,
     initialLoading,
     initialError,

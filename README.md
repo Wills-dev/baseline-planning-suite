@@ -43,7 +43,7 @@ Provides the searchable employee register, employee details, weekly hours/roles,
 
 Owns the delivery-planning domain.
 
-Provides project selection, three-level WBS editing, leaf staffing allocations, and derived parent totals. Cross-project capacity warnings and authoritative cost views remain deferred.
+Provides project selection, three-level WBS editing, leaf staffing allocations, and derived parent totals. Cross-project capacity warnings and effective-dated Cost views use canonical hours and the public People planning capability.
 
 ### Shared Packages
 
@@ -85,7 +85,7 @@ Pricing returns `totalCostEUR`, `hoursPerWorkingDay`, `missingRateDays`, and `da
 
 Reference: **0.50 PM in March 2026 for Adaeze Okafor (40h/week)** gives 22 working days, **176 monthly hours**, **88 allocation hours**, and **50% capacity**. With €80/hour from 2025-01-01 and €95/hour from 2026-03-12, 8 days at the old rate and 14 at the new rate yield **€7,880**, with a blended rate displayed as **€89.5455/hour**. The underlying blended value remains unrounded.
 
-Core calculations have unit tests that run in Node without React or a browser. Delivery now derives WBS parent totals in its pure application layer. Cost → Hours editing, capacity conflict detection, and largest-remainder reconciliation remain unimplemented.
+Core calculations have unit tests that run in Node without React or a browser. Delivery now derives WBS parent totals in its pure application layer. Cost → Hours editing and cross-project capacity detection are implemented. Largest-remainder reconciliation remains deferred.
 
 ## Workspace Architecture
 
@@ -133,7 +133,7 @@ Shell fetches `remote-config.json` relative to its Vite base URL before the firs
 
 For development, edit `apps/shell/public/remote-config.json`. At deployment, provide or replace `apps/shell/dist/remote-config.json` with the deployed remote entry URLs; Shell's JavaScript needs no rebuild. The server may serve this file from runtime/container configuration, but no container setup exists yet. URLs are registered once per page session; reload Shell after changing them. Remote hosting must serve the entry and its assets with appropriate cross-origin access. Vite dev and preview servers enable CORS for local composition.
 
-People displays the employee register and rate-history editor; Delivery displays project, WBS, and staffing planning. Event transport, rate-change synchronization, and dedicated remote failure isolation remain unimplemented.
+People displays the employee register and rate-history editor; Delivery displays project, WBS, and staffing planning. Document event transport and targeted rate-change synchronization are implemented; dedicated Shell remote failure isolation remains deferred.
 
 ## Persistence and Seed Data
 
@@ -152,13 +152,13 @@ The supplied dataset contains **60 employees, 150 rates, four projects, 90 WBS i
 
 The grid horizon comes from JSON metadata: **Apr 2026–Mar 2027**, expanded once into twelve `YearMonth` values. Delivery exposes this through application bootstrap configuration and its initialization result; the hook passes the horizon to components without importing persistence fixtures. The supplied March 2026 allocation `alloc-001` for Adaeze Okafor (`emp-001`) is retained even though it lies outside that grid. It maps from 0.5 PM to 88 hours. Her supplied `rate-001` and `rate-002` are €80 from 2025-01-01 and €95 from 2026-03-12.
 
-People owns mutable employee/rate state; Delivery owns mutable projects/WBS/allocations. Sharing bootstrap input does not share runtime ownership or persistence. Delivery's temporary planning-person provider selects only ID/name/weekly hours from the official mapper and never reads People storage or copies mutable rate state. Authoritative runtime access remains deferred.
+People owns mutable employee/rate state; Delivery owns mutable projects/WBS/allocations. Sharing bootstrap input does not share runtime ownership or persistence. Delivery consumes read-only People planning snapshots through a provider. Hosted snapshots come from the public People capability; explicit standalone bootstrap mode uses the official seed. Delivery never reads People storage or persists rate snapshots.
 
 **Fixture migration:** schema version stays 1 because no stores/indexes change. The `_metadata` record `fixtures-initialized` now carries `version: official-1.0.0`. An existing marker without a version identifies the old generated bootstrap and triggers a **one-time replacement of all records in that owner database**, including development edits, with official fixtures. Clearing, inserting, and updating the marker commit atomically in one transaction; concurrent tabs serialize initialization. This deliberate development reset avoids retaining orphaned edits referencing obsolete IDs. It is not a production user-data migration.
 
 After this migration, reloads preserve additions, edits, and deletions, including empty stores. A fresh empty database seeds once. Unmarked nonempty data is preserved and marked without backfilling. An unrecognized version is rejected and requires an explicit future migration; changing JSON metadata never silently resets a versioned database. No manual DevTools deletion is needed for the known legacy fixture marker.
 
-Browser storage is origin-scoped: standalone apps on separate ports have separate storage from hosted apps executing at the Shell origin. Cross-application authoritative data retrieval, `people.rateChanged` transport/publication, and live synchronization are not implemented. People and Delivery planning are implemented; rate synchronization and cross-project capacity warnings remain deferred.
+Browser storage is origin-scoped: standalone apps on separate ports have separate storage from hosted apps executing at the Shell origin. Hosted authoritative snapshots and document-scoped `people.rateChanged` invalidation update derived Delivery costs. Standalone origins retain separate owner databases; events do not cross tabs or origins.
 
 ## People Register and Rate Editing
 
@@ -168,7 +168,7 @@ The application service/hook owns repository calls and local React state; regist
 
 Successful mutations refresh the selected history. Persisted edits and deletions survive browser reload without reseeding. Hourly rates display as EUR with two decimals; stored values retain entered precision. There is no end-date field or currency conversion. Duplicate-date validation is application-level, not a cross-tab transactional uniqueness constraint; simultaneous independent tabs are not coordinated.
 
-`people.rateChanged` publication/transport and Delivery synchronization remain unimplemented. Storage remains origin-scoped, so standalone People and People hosted at a different Shell origin have separate databases.
+`people.rateChanged` is published after successful rate add/edit/delete persistence. Delivery subscribes once per mounted page and unsubscribes on teardown. Storage remains origin-scoped, so standalone People and People hosted at a different Shell origin have separate databases.
 
 ## Delivery Project Planning
 
@@ -182,7 +182,7 @@ PM, Hours, and % capacity derive from canonical `Allocation.hours` using the dom
 
 New allocation IDs encode `(projectId, breakdownItemId, employeeId, month)` deterministically; existing seeded IDs are retained. Repeated edits update the same record. Duplicate existing logical records are rejected rather than silently merged. The current page serializes mutations and disables project, WBS, and unit selection while saving. A separate cell guard prevents Enter/blur from submitting twice, and changing the selected work item resets cell drafts and WBS editor state. The request guard also cancels responses after unmount; cross-tab conflict coordination is not implemented.
 
-The `PlanningPeopleProvider` boundary in Delivery's `application/planning-people.ts` supplies a clearly marked temporary Step-8 fixture read model containing only employee ID, name, and weekly hours. It derives supplied bootstrap identities without importing People or reading its storage; it can be replaced with authoritative access in Step 10. It contains no rates. **Cost is disabled** with an explanation until authoritative People pricing data is connected. No Delivery-owned rate source or cross-remote synchronization is implemented.
+The `PlanningPeopleProvider` boundary supplies employee ID, name, weekly hours, and read-only effective-dated rate snapshots. Its integration adapter resolves the public People capability through Module Federation, without People source imports or storage access. Cost is derived and editable when rates cover the whole month; no rate or cost fields are added to Delivery persistence.
 
 ## Getting Started
 
@@ -280,7 +280,7 @@ npm run build
 
 ## Current Status
 
-Step 8 is complete using the supplied official bootstrap. Delivery supports project selection, WBS editing, leaf allocations, and parent totals; Cost remains unavailable until authoritative People integration.
+Steps 8–10 are complete using the supplied official bootstrap. Delivery supports project/WBS planning, all four allocation units, global capacity warnings, authoritative People rate consumption, and live hosted rate invalidation.
 
 Implemented:
 
@@ -303,15 +303,35 @@ Implemented:
 - Focused People search, validation, and repository-orchestration tests
 - Delivery project selection, safe WBS editing, Apr 2026–Mar 2027 leaf staffing grid, and canonical-hour unit conversions
 - Derived parent totals and focused WBS/allocation application tests
-- Temporary Delivery planning-person provider; Cost deliberately unavailable
+- Public People planning capability, injectable providers, derived Cost display/editing, and targeted rate invalidation
 - Root development and quality-check commands
 
 Not yet implemented:
 
-- Authoritative Delivery cost views and Cost → Hours editing
-- Cross-project capacity warnings and largest-remainder reconciliation
-- Cross-application event transport, authoritative data retrieval, and live recalculation
+- Largest-remainder reconciliation
 - Failure isolation
 - Docker/container configuration
 
 These capabilities will be introduced incrementally while maintaining clear ownership between Shell, People, and Delivery.
+
+## Authoritative planning rates and Cost (Step 10)
+
+People owns employees, weekly schedules, and rate histories. Delivery owns projects, WBS, and canonical-hour allocations. People now exposes the non-React `./PlanningRates` module alongside `./PeoplePage`: `listPlanningPeople()` and `getPlanningPerson(employeeId)` return narrow read-only snapshots. The shared contracts describe this public API, so consumers never share or import owner repositories, IndexedDB primitives, or hooks.
+
+Shell uses its existing `remote-config.json` and runtime remote registration to load `people/PlanningRates`. It passes a capability loader to Delivery's provider adapter through the public Delivery page. Remote URLs remain runtime configuration; the same remote builds run standalone or hosted with React/react-dom singletons. Shell keeps visited pages mounted but hidden while switching tabs, preserving Delivery project/WBS/unit selection and its invalidation subscription without global application state.
+
+Standalone Delivery reads its own origin's `remote-config.json`. The supplied `{ "people": null }` explicitly selects labelled official-bootstrap names, schedules, and rates. Configure `{ "people": "<People remoteEntry URL>" }` to use the public authoritative capability instead. A configured capability failure never falls back to bootstrap rates. The owner module executes at the consuming document's origin: configured standalone Delivery reads People-owned storage at the Delivery origin, not the separate standalone People origin. Hosted People and Delivery share the Shell document's origin and owner databases.
+
+The contracts package provides framework-independent document `CustomEvent` publication/subscription for the existing `people.rateChanged` name. The payload is only `{ employeeId }`, an invalidation signal, never copied rate history. People publishes immediately after successful rate add/edit/delete persistence; validation or persistence failures do not publish. Delivery subscribes at its hook boundary with teardown cleanup, refetches only the affected employee through the provider, and replaces that read-only snapshot. Older targeted responses cannot overwrite newer ones. No browser reload or remote reload occurs. Allocation hours and global capacity utilization stay unchanged; derived costs and subsequent Cost input conversions use refreshed rates. Cost saves also fetch the affected employee afresh before conversion.
+
+Monthly pricing reuses `priceAllocation`: spread hours evenly over Mon–Fri dates (no holidays), choose the latest rate with inclusive `validFrom` for each date, and sum unrounded daily costs. The next rate implicitly ends the previous one; any number of rate changes works. `costToHours` prices one hour with the same engine and divides entered EUR cost by that monthly blended rate, retaining full precision. Cost is never persisted. Parent cells remain read-only and sum individually priced descendant leaf allocations without double counting or parent records. EUR formatting is temporary normal monetary formatting; largest-remainder distribution and final precision reconciliation remain deferred.
+
+Complete rate coverage is required to display or edit Cost. Missing coverage (including only partly covered months) shows **Cost unavailable: no applicable rate.**, with no invented €0. Invalid or failed rate data also disables Cost and displays an explicit error; PM/Hours/% remain usable. When authority fails, previously loaded names/schedules are retained; on first-load failure only official bootstrap identities/schedules are used for hour planning, with rates emptied and an unavailable-authority message. Retry People data can recover the capability. A real zero-rate month displays €0 but disables Cost editing because the inverse has no unique answer; use the other units. Event transport is document-scoped, not cross-tab/cross-origin synchronization. Full Shell failure isolation is still deferred.
+
+The supplied Adaeze March reference is verified using the actual seed despite remaining outside the visible Apr 2026–Mar 2027 horizon: 40h/week, 22 weekdays, 176h capacity, 0.50 PM = 88h = 50%; 4h/day at €80 for eight weekdays and €95 from March 12 for fourteen weekdays gives **€7,880**, with blended rate **€89.5454545/h**. No fixture or horizon change is needed.
+
+## Global capacity (Step 9 behavior)
+
+Capacity is `weeklyHours × Mon–Fri working days / 5`. Delivery reads all persisted allocations and groups canonical hours by employee/month across every project, providing a lookup independent of selected work-item totals. Utilization is `global hours / capacity × 100`, tested at full precision: exactly 100% is valid, 100.0001% warns. Valid edits save even above capacity; reductions and deletion clear resolved warnings. Rates never enter this calculation.
+
+Visible editable and read-only parent cells show utilization warnings stating that all projects are included, with accessible descriptions and text rather than color alone. Warning metadata is derived, never stored on allocations. The latest successful positive edit leaving a conflict owns that employee/month highlight for the current service session; later edits transfer ownership, deletion removes its highlight, and reload starts a new session. Historical seed data has no reliable edit ordering, so it gets global warnings without invented latest-edit metadata. Milan Brandt's June `alloc-050` and `alloc-073` each contribute 0.59 PM, totalling 207.68 / 176 = **118%** across two projects.

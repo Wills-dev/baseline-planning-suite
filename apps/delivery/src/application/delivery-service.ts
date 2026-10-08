@@ -1,5 +1,7 @@
+import { calculateCapacityStatuses, capacityKey } from '@baseline/domain';
 import type {
   Allocation,
+  CapacityStatus,
   BreakdownItem,
   BreakdownItemType,
   YearMonth,
@@ -17,6 +19,13 @@ export interface ProjectPlanningData {
   projectId: string;
   items: BreakdownItem[];
   allocations: Allocation[];
+  people: PlanningPerson[];
+  peopleStatus: string;
+  capacityStatuses: ReadonlyMap<string, CapacityStatus>;
+  latestCapacityEdits: ReadonlyMap<
+    string,
+    { projectId: string; breakdownItemId: string }
+  >;
 }
 
 export interface WorkItemInput {
@@ -32,35 +41,128 @@ export function createDeliveryService(
   configuration: PlanningConfiguration = bootstrapPlanningConfiguration,
 ) {
   const { planningMonths } = configuration;
+  const latestCapacityEdits = new Map<
+    string,
+    { projectId: string; breakdownItemId: string }
+  >();
+  let people: PlanningPerson[] | undefined;
+  let capacityAllocations: readonly Allocation[] = [];
+  function currentPeople(): PlanningPerson[] {
+    return [...(people ?? [])];
+  }
+  let peopleRequest: Promise<PlanningPerson[]> | undefined;
+  const refreshVersions = new Map<string, number>();
+  async function readPeople(): Promise<PlanningPerson[]> {
+    if (people) return people;
+    peopleRequest ??= peopleProvider
+      .listPeople()
+      .then((result) => {
+        people = result;
+        return result;
+      })
+      .finally(() => {
+        peopleRequest = undefined;
+      });
+    return peopleRequest;
+  }
+  async function refreshPerson(employeeId: string): Promise<PlanningPerson[]> {
+    await readPeople();
+    const version = (refreshVersions.get(employeeId) ?? 0) + 1;
+    refreshVersions.set(employeeId, version);
+    let person: PlanningPerson | undefined;
+    try {
+      person = await peopleProvider.getPerson(employeeId);
+    } catch {
+      const previous = people!.find((item) => item.employeeId === employeeId);
+      person = previous
+        ? {
+            ...previous,
+            rates: [],
+            rateDataError: 'People rate data unavailable. Retry People data.',
+          }
+        : undefined;
+    }
+    if (refreshVersions.get(employeeId) === version) {
+      people = people!.filter((item) => item.employeeId !== employeeId);
+      if (person) people.push(person);
+      people.sort((left, right) =>
+        left.employeeId.localeCompare(right.employeeId),
+      );
+    }
+    return [...people!];
+  }
   async function loadProject(projectId: string): Promise<ProjectPlanningData> {
     if (!(await repository.getProject(projectId)))
       throw new PlanningInputError('The selected project no longer exists.');
-    const [items, allocations] = await Promise.all([
+    const [items, allAllocations] = await Promise.all([
       repository.listBreakdownItems(projectId),
-      repository.listProjectAllocations(projectId),
+      repository.listAllocations(),
+      readPeople(),
     ]);
+    const snapshots = people ?? [];
+    capacityAllocations = allAllocations;
+    const allocations = allAllocations.filter(
+      (allocation) => allocation.projectId === projectId,
+    );
     buildWbsTree(items);
     if (
-      allocations.some(
+      allAllocations.some(
         (allocation) =>
           !Number.isFinite(allocation.hours) || allocation.hours < 0,
       )
     )
       throw new PlanningInputError(
-        'This project contains invalid allocation hours. Correct the stored record before planning.',
+        'Delivery contains invalid allocation hours. Correct the stored record before planning.',
       );
-    return { projectId, items, allocations };
+    const capacityStatuses = calculateCapacityStatuses(
+      snapshots,
+      planningMonths,
+      allAllocations,
+    );
+    for (const key of latestCapacityEdits.keys())
+      if (!capacityStatuses.get(key)?.overAllocated)
+        latestCapacityEdits.delete(key);
+    return {
+      projectId,
+      items,
+      allocations,
+      people: snapshots,
+      peopleStatus: peopleProvider.getStatus?.() ?? 'Planning people provider.',
+      capacityStatuses,
+      latestCapacityEdits: new Map(latestCapacityEdits),
+    };
   }
   return {
     initialize: async () => {
       await repository.initialize();
-      const [projects, people] = await Promise.all([
+      people = undefined;
+      const [projects] = await Promise.all([
         repository.listProjects(),
-        peopleProvider.listPeople(),
+        readPeople(),
       ]);
-      return { projects, people, planningMonths };
+      return {
+        projects,
+        people: currentPeople(),
+        planningMonths,
+        peopleStatus:
+          peopleProvider.getStatus?.() ?? 'Planning people provider.',
+      };
     },
     loadProject,
+    refreshPerson,
+    currentPeople,
+    peopleStatus: () =>
+      peopleProvider.getStatus?.() ?? 'Planning people provider.',
+    currentCapacityStatuses: () =>
+      calculateCapacityStatuses(
+        people ?? [],
+        planningMonths,
+        capacityAllocations,
+      ),
+    retryPeople: async () => {
+      people = undefined;
+      return readPeople();
+    },
     saveWorkItem: async (
       projectId: string,
       input: WorkItemInput,
@@ -101,7 +203,8 @@ export function createDeliveryService(
         throw new PlanningInputError(
           'Select a leaf work item to edit allocations. Parent totals are read-only.',
         );
-      const people: PlanningPerson[] = await peopleProvider.listPeople();
+      const people: PlanningPerson[] =
+        unit === 'Cost' ? await refreshPerson(employeeId) : await readPeople();
       const person = people.find(
         (candidate) => candidate.employeeId === employeeId,
       );
@@ -139,6 +242,10 @@ export function createDeliveryService(
           hours,
         });
       }
+      const key = capacityKey(employeeId, month);
+      if (hours > 0)
+        latestCapacityEdits.set(key, { projectId, breakdownItemId: leafId });
+      else latestCapacityEdits.delete(key);
       return loadProject(projectId);
     },
   };

@@ -1,3 +1,4 @@
+import { publishPeopleRateChanged } from '@baseline/contracts';
 import type { DateOnly, Employee, RateRecord } from '@baseline/domain';
 import type { PeopleRepository } from '../persistence/people-repository';
 
@@ -56,6 +57,7 @@ export function validateRateInput(
 export function createPeopleService(
   repository: PeopleRepository,
   createId: () => string = () => crypto.randomUUID(),
+  publish: typeof publishPeopleRateChanged = publishPeopleRateChanged,
 ) {
   async function requireEmployee(employeeId: string): Promise<void> {
     if (!(await repository.getEmployee(employeeId)))
@@ -101,12 +103,14 @@ export function createPeopleService(
       };
       if (existing) await repository.updateRateRecord(record);
       else await repository.addRateRecord(record);
+      publish({ employeeId });
       return repository.listRateHistory(employeeId);
     },
     deleteRate: async (employeeId: string, id: string) => {
       await requireEmployee(employeeId);
       await requireOwnedRate(employeeId, id);
       await repository.deleteRateRecord(id);
+      publish({ employeeId });
       return repository.listRateHistory(employeeId);
     },
   };

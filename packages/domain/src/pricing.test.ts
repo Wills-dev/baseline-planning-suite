@@ -5,7 +5,7 @@ import {
   personMonthsToHours,
 } from './allocation-conversions.js';
 import { monthlyCapacityHours } from './capacity.js';
-import { blendedHourlyRate, priceAllocation } from './pricing.js';
+import { blendedHourlyRate, priceAllocation, costToHours } from './pricing.js';
 import type { RateRecord } from './rate-record.js';
 import { getWorkingDays } from './working-days.js';
 
@@ -138,4 +138,82 @@ describe('monthly allocation pricing', () => {
     }
     expect(() => blendedHourlyRate(NaN, 88)).toThrow(RangeError);
   });
+});
+
+test('inverse pricing reproduces the reference and retains fractional hours', () => {
+  expect(costToHours(7880, 'okafor', '2026-03', rates)).toBeCloseTo(88, 12);
+  const hours = 1.123456789012345;
+  const cost = priceAllocation({ ...allocation, hours }, rates).totalCostEUR;
+  expect(costToHours(cost, 'okafor', '2026-03', rates)).toBeCloseTo(hours, 14);
+  expect(costToHours(cost, 'okafor', '2026-03', rates)).not.toBe(
+    Number(hours.toFixed(4)),
+  );
+});
+test('multiple inclusive effective periods use their actual working-day portions', () => {
+  const history: RateRecord[] = [
+    {
+      id: '1',
+      employeeId: 'okafor',
+      validFrom: '2026-01-01',
+      hourlyCostEUR: 80,
+    },
+    {
+      id: '2',
+      employeeId: 'okafor',
+      validFrom: '2026-01-10',
+      hourlyCostEUR: 90,
+    },
+    {
+      id: '3',
+      employeeId: 'okafor',
+      validFrom: '2026-01-20',
+      hourlyCostEUR: 100,
+    },
+  ];
+  const result = priceAllocation(
+    { ...allocation, month: '2026-01', hours: 22 },
+    history,
+  );
+  expect(
+    result.dailyPrices.filter((day) => day.hourlyCostEUR === 80),
+  ).toHaveLength(7);
+  expect(
+    result.dailyPrices.filter((day) => day.hourlyCostEUR === 90),
+  ).toHaveLength(6);
+  expect(
+    result.dailyPrices.filter((day) => day.hourlyCostEUR === 100),
+  ).toHaveLength(9);
+  expect(
+    result.dailyPrices.find((day) => day.date === '2026-01-20')?.hourlyCostEUR,
+  ).toBe(100);
+  expect(result.totalCostEUR).toBe(2000);
+  expect(costToHours(2000, 'okafor', '2026-01', history)).toBeCloseTo(22, 12);
+});
+test('single-rate inverse and unavailable/zero-rate inverse behavior are explicit', () => {
+  const single: RateRecord[] = [
+    {
+      id: '1',
+      employeeId: 'okafor',
+      validFrom: '2025-01-01',
+      hourlyCostEUR: 80,
+    },
+  ];
+  expect(priceAllocation(allocation, single).totalCostEUR).toBe(7040);
+  expect(costToHours(7040, 'okafor', '2026-03', single)).toBeCloseTo(88, 12);
+  expect(() => costToHours(1, 'okafor', '2026-03', [])).toThrow(
+    'no applicable rate',
+  );
+  expect(() =>
+    costToHours(
+      1,
+      'okafor',
+      '2026-03',
+      rates.filter((rate) => rate.id === 'new'),
+    ),
+  ).toThrow('no applicable rate');
+  expect(() =>
+    costToHours(0, 'okafor', '2026-03', [{ ...single[0]!, hourlyCostEUR: 0 }]),
+  ).toThrow('monthly rate is zero');
+  for (const cost of [-1, NaN, Infinity])
+    expect(() => costToHours(cost, 'okafor', '2026-03', rates)).toThrow();
 });

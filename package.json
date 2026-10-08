@@ -13,13 +13,13 @@
   ],
   "scripts": {
     "dev": "npm run build:packages && concurrently --kill-others --names shell,people,delivery \"npm run dev -w @baseline/shell\" \"npm run dev -w @baseline/people\" \"npm run dev -w @baseline/delivery\"",
-    "build": "npm run build --workspaces",
+    "build": "npm run build:packages && npm run build --workspaces",
     "test": "npm run build:packages && vitest run",
     "lint": "eslint . --max-warnings 0",
     "typecheck": "npm run build:packages && tsc --noEmit -p tsconfig.json && npm run typecheck --workspaces",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "build:packages": "npm run build --workspace @baseline/domain --workspace @baseline/persistence"
+    "build:packages": "npm run build --workspace @baseline/domain --workspace @baseline/contracts --workspace @baseline/persistence"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -64,14 +64,12 @@ export function ProjectPlanningPanel({
         />
       </aside>
       <div className="delivery-staffing-panel">
-        <p className="delivery-planning-note">
-          Temporary fixture planning people provide names and weekly hours.
-          Authoritative People data will be connected in Step 10.
-        </p>
         <UnitSelector unit={unit} disabled={busy} onChange={setUnit} />
         {selected ? (
           <StaffingGrid
             selectedId={selectedId}
+            capacityStatuses={data.capacityStatuses}
+            latestCapacityEdits={data.latestCapacityEdits}
             items={data.items}
             allocations={data.allocations}
             people={people}

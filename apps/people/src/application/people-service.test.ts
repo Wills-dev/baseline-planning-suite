@@ -1,3 +1,4 @@
+import { createPlanningPeopleCapability } from './planning-capability';
 import { describe, expect, test, vi } from 'vitest';
 import type { PeopleRepository } from '../persistence/people-repository';
 import { createPeopleFixtures } from '../persistence/fixtures';
@@ -202,4 +203,132 @@ describe('People repository-facing orchestration', () => {
     ).rejects.toThrow('Storage unavailable');
     expect(await repository.getRateRecord('new-rate')).toBeUndefined();
   });
+});
+
+test('add/edit/delete publish only employeeId after successful persistence', async () => {
+  const repository = memoryRepository();
+  const observed: unknown[] = [];
+  const publish = vi.fn(({ employeeId }: { employeeId: string }) =>
+    observed.push({ employeeId }),
+  );
+  const service = createPeopleService(
+    repository,
+    () => 'new-event-rate',
+    publish,
+  );
+  const persisted = vi.spyOn(repository, 'addRateRecord');
+  await service.saveRate('emp-001', {
+    validFrom: '2027-01-01',
+    hourlyCostEUR: '100',
+  });
+  expect(persisted.mock.invocationCallOrder[0]).toBeLessThan(
+    publish.mock.invocationCallOrder[0]!,
+  );
+  const update = vi.spyOn(repository, 'updateRateRecord');
+  await service.saveRate(
+    'emp-001',
+    { validFrom: '2027-01-01', hourlyCostEUR: '105' },
+    'new-event-rate',
+  );
+  expect(update.mock.invocationCallOrder[0]).toBeLessThan(
+    publish.mock.invocationCallOrder[1]!,
+  );
+  const remove = vi.spyOn(repository, 'deleteRateRecord');
+  await service.deleteRate('emp-001', 'new-event-rate');
+  expect(remove.mock.invocationCallOrder[0]).toBeLessThan(
+    publish.mock.invocationCallOrder[2]!,
+  );
+  expect(observed).toEqual([
+    { employeeId: 'emp-001' },
+    { employeeId: 'emp-001' },
+    { employeeId: 'emp-001' },
+  ]);
+});
+test('validation and each failed mutation path never publish', async () => {
+  const repository = memoryRepository();
+  const publish = vi.fn();
+  const service = createPeopleService(
+    repository,
+    () => 'new-event-rate',
+    publish,
+  );
+  await expect(
+    service.saveRate('emp-001', {
+      validFrom: '2026-03-12',
+      hourlyCostEUR: '-1',
+    }),
+  ).rejects.toThrow();
+  vi.spyOn(repository, 'addRateRecord').mockRejectedValue(
+    new Error('add failed'),
+  );
+  vi.spyOn(repository, 'updateRateRecord').mockRejectedValue(
+    new Error('edit failed'),
+  );
+  vi.spyOn(repository, 'deleteRateRecord').mockRejectedValue(
+    new Error('delete failed'),
+  );
+  await expect(
+    service.saveRate('emp-001', {
+      validFrom: '2027-01-01',
+      hourlyCostEUR: '100',
+    }),
+  ).rejects.toThrow('add failed');
+  await expect(
+    service.saveRate(
+      'emp-001',
+      { validFrom: '2026-03-12', hourlyCostEUR: '100' },
+      'rate-002',
+    ),
+  ).rejects.toThrow('edit failed');
+  await expect(service.deleteRate('emp-001', 'rate-002')).rejects.toThrow(
+    'delete failed',
+  );
+  expect(publish).not.toHaveBeenCalled();
+});
+
+test('public planning capability returns fresh owner snapshots without exposing persistence', async () => {
+  const repository = memoryRepository();
+  const capability = createPlanningPeopleCapability(repository);
+  expect(Object.keys(capability).sort()).toEqual([
+    'getPlanningPerson',
+    'listPlanningPeople',
+  ]);
+  expect(await capability.listPlanningPeople()).toHaveLength(60);
+  const before = await capability.getPlanningPerson('emp-001');
+  expect(before?.rates.map((rate) => rate.hourlyCostEUR)).toEqual([80, 95]);
+  await repository.updateRateRecord({
+    ...before!.rates[1]!,
+    hourlyCostEUR: 110,
+  });
+  expect(
+    (await capability.getPlanningPerson('emp-001'))?.rates[1]?.hourlyCostEUR,
+  ).toBe(110);
+  expect(before?.rates[1]?.hourlyCostEUR).toBe(95);
+  expect(await capability.getPlanningPerson('missing')).toBeUndefined();
+});
+
+test('rate publication waits for persistence completion rather than request initiation', async () => {
+  const repository = memoryRepository();
+  let finish: (() => void) | undefined;
+  vi.spyOn(repository, 'addRateRecord').mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const publish = vi.fn();
+  const service = createPeopleService(
+    repository,
+    () => 'pending-rate',
+    publish,
+  );
+  const saving = service.saveRate('emp-001', {
+    validFrom: '2027-01-01',
+    hourlyCostEUR: '100',
+  });
+  await vi.waitFor(() => expect(finish).toBeDefined());
+  expect(publish).not.toHaveBeenCalled();
+  finish?.();
+  await saving;
+  expect(publish).toHaveBeenCalledExactlyOnceWith({ employeeId: 'emp-001' });
 });
