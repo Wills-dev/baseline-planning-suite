@@ -4,7 +4,7 @@ Baseline Planning Suite is a delivery-planning application for managing people, 
 
 The application is being developed as three independently built frontend applications: **Shell**, **People**, and **Delivery**.
 
-This repository currently contains the workspace/tooling foundation, framework-independent domain types, and the core allocation calculation engine. Business functionality and micro-frontend integration will be introduced incrementally.
+This repository currently contains the workspace/tooling foundation, framework-independent domain types, the core allocation calculation engine, and a public rate-change contract. Business functionality and micro-frontend integration will be introduced incrementally.
 
 ## Repository Structure
 
@@ -56,9 +56,7 @@ The domain package does not depend on React.
 
 #### `packages/contracts`
 
-Reserved for intentionally shared public contracts between independently owned applications.
-
-This package will contain only contracts that need to cross application boundaries. It will not contain application internals or shared global state.
+Defines intentionally shared public cross-application contracts, exported through `@baseline/contracts`. It contains no application internals, duplicated domain model, or shared global state.
 
 ## Domain Model
 
@@ -91,6 +89,25 @@ The repository uses **npm workspaces** to manage the three applications and shar
 Keeping the applications in one workspace simplifies local development and shared tooling while preserving explicit application boundaries.
 
 The applications do not import each other's internal source code. Shared functionality must cross a deliberate package or public contract boundary.
+
+## Shared Communication Contracts
+
+People owns employee information, weekly hours, roles, and authoritative rate history. Delivery owns planning, allocations, capacity, and pricing views; Shell owns navigation, the active user, and display currency. Applications must not import one another's internal source code.
+
+`packages/contracts` exports the framework-independent `PeopleRateChangedEvent` type:
+
+```ts
+import type { PeopleRateChangedEvent } from '@baseline/contracts';
+
+const event: PeopleRateChangedEvent = {
+  type: 'people.rateChanged',
+  payload: { employeeId: 'employee-id' },
+};
+```
+
+This invalidation contract identifies the employee whose authoritative rate history changed. Consumers should obtain the latest authoritative rate information before recalculating affected views. It carries no state snapshot or Delivery-specific instructions. The contract defines only what crosses the boundary; transport, authoritative data retrieval, event publication/subscription, and live Delivery recalculation are not implemented.
+
+The contracts package has no React or application dependencies. The domain package remains independent of contracts and application integration concerns.
 
 ## Getting Started
 
@@ -157,7 +174,7 @@ npm run build
 
 ## Current Status
 
-Step 3 adds the tested core allocation calculation engine to the domain model and project foundation.
+Step 4 adds the public rate-history invalidation contract to the existing domain model, calculation engine, and project foundation.
 
 Implemented:
 
@@ -171,6 +188,7 @@ Implemented:
 - UTC working days, monthly capacity, and PM/Percent ↔ Hours conversions
 - Effective-dated pricing, missing-rate reporting, and blended hourly rates
 - Domain calculation unit tests
+- Public `people.rateChanged` invalidation contract
 - Root development and quality-check commands
 
 Not yet implemented:
@@ -180,7 +198,7 @@ Not yet implemented:
 - Staffing allocation UI and Cost → Hours editing
 - Capacity conflict detection, WBS roll-ups, and largest-remainder reconciliation
 - Persistence
-- Cross-application communication
+- Cross-application event transport, authoritative data retrieval, and live recalculation
 - Module Federation
 - Runtime remote loading
 - Failure isolation

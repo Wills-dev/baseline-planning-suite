@@ -8,7 +8,7 @@ import { getWorkingDays } from './working-days.js';
 export interface DailyAllocationPrice {
   date: DateOnly;
   allocationHours: number;
-  /** null means no effective rate; a real zero cost rate is represented by 0. */
+  /** null means no effective rate; a real zero-cost rate is represented by 0. */
   hourlyCostEUR: number | null;
   costEUR: number;
 }
