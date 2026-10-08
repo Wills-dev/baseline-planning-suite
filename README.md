@@ -2,9 +2,9 @@
 
 Baseline Planning Suite is a delivery-planning application for managing people, project allocations, capacity, and delivery costs.
 
-The application is being developed as three independently built frontend applications: **Shell**, **People**, and **Delivery**.
+The application consists of three independently built frontend applications: **Shell**, **People**, and **Delivery**.
 
-This repository currently contains the workspace/tooling foundation, framework-independent domain types, the core allocation calculation engine, a public rate-change contract, Module Federation composition, ownership-specific IndexedDB persistence, a searchable People register with rate-history editing, and Delivery project/WBS/staffing planning. Business functionality and micro-frontend integration will be introduced incrementally.
+People manages employees and effective-dated rates. Delivery provides project/WBS staffing, Cost planning, cross-project capacity warnings, and display reconciliation using canonical hours. Shell composes the remotes through runtime Module Federation configuration with independent failure isolation.
 
 ## Running the application
 
@@ -43,6 +43,8 @@ Runtime JSON uses `Cache-Control: no-store`; entries and HTML revalidate, and ha
 
 Application data lives in **browser IndexedDB**, not Docker volumes. `docker compose down` or a container restart does not reset it. The shared origin allows hosted and standalone pages to see the same owner databases, `baseline-planning-people` and `baseline-planning-delivery`; URL paths do not partition IndexedDB. `localhost:8080` is a different origin from development ports, so existing development-port data is not automatically carried over. Rate invalidation remains document-scoped; separate tabs do not exchange `people.rateChanged` events.
 
+**Verification:** Compose configuration was validated, and production artifacts were verified using native Nginx, including hosted/standalone pages, remote assets, rate-driven Cost updates, and remote failure recovery. Actual Docker engine image build, container startup, and restart were **not executed because Docker was unavailable**.
+
 ## Repository Structure
 
 ```text
@@ -68,7 +70,7 @@ baseline-planning-suite/
 
 The application shell.
 
-Hosts the People and Delivery pages at runtime and provides simple navigation between them. Active user and display currency remain future application-level concerns.
+Owns runtime composition, navigation, and independent remote loading/error/retry areas. Active-user management and selectable display currency are not implemented; current rate and Cost views use EUR.
 
 #### People
 
@@ -88,7 +90,7 @@ Provides project selection, three-level WBS editing, leaf staffing allocations, 
 
 Contains framework-independent domain types and allocation calculations with an intentional public entry point at `src/index.ts`.
 
-Working-day arithmetic, monthly capacity, PM/Percent conversions, and effective-dated allocation pricing are implemented as pure TypeScript. Roll-ups and reconciliation are not implemented.
+Working-day arithmetic, monthly capacity, PM/Percent conversions, effective-dated pricing and its Cost inverse, cross-project capacity aggregation, and largest-remainder display utilities are pure TypeScript. Delivery’s application layer derives WBS roll-ups and applies reconciliation through the hierarchy.
 
 The domain package does not depend on React.
 
@@ -134,7 +136,7 @@ The applications do not import each other's internal source code. Shared functio
 
 ## Shared Communication Contracts
 
-People owns employee information, weekly hours, roles, and authoritative rate history. Delivery owns planning, allocations, capacity, and pricing views; Shell owns navigation, the active user, and display currency. Applications must not import one another's internal source code.
+People owns employee information, weekly hours, roles, and authoritative rate history. Delivery owns planning, allocations, capacity, and pricing views; Shell owns runtime composition and navigation. Active-user management and currency selection are outside the current implementation. Applications must not import one another's internal source code.
 
 `packages/contracts` exports the framework-independent `PeopleRateChangedEvent` type:
 
@@ -147,15 +149,15 @@ const event: PeopleRateChangedEvent = {
 };
 ```
 
-This invalidation contract identifies the employee whose authoritative rate history changed. Consumers should obtain the latest authoritative rate information before recalculating affected views. It carries no state snapshot or Delivery-specific instructions. The contract defines only what crosses the boundary; transport, authoritative data retrieval, event publication/subscription, and live Delivery recalculation are not implemented.
+This invalidation contract carries only the employee ID, never a rate snapshot or Delivery-specific instructions. DOM-safe document event helpers publish and subscribe to `people.rateChanged`. People publishes after successful persistence; Delivery refetches the affected employee through `./PlanningRates` and recalculates derived Cost without changing canonical hours.
 
 The contracts package has no React or application dependencies. The domain package remains independent of contracts and application integration concerns.
 
 ## Module Federation
 
-Shell is the host; People and Delivery are independently built remotes using `@module-federation/vite`. People exposes `./PeoplePage` as `people/PeoplePage`; Delivery exposes `./DeliveryPage` as `delivery/DeliveryPage`. Each is a default-exported React component, reused by the remote's standalone `App` and federated exposure. Shell consumes only those public modules, never remote application source.
+Shell is the host; People and Delivery are independently built remotes using `@module-federation/vite`. People exposes `./PeoplePage` and the read-only `./PlanningRates` capability; Delivery exposes `./DeliveryPage`. The page exposures are default-exported React components reused by standalone and hosted applications. Shell resolves public modules at runtime and injects the People capability loader into Delivery; it never imports remote implementation source.
 
-All three federation configurations share `react` and `react-dom` as singletons using the existing React version. The plugin also handles discovered React subpaths. Shell uses typed `loadRemote` calls returning a default `ComponentType`, with `React.lazy` and a minimal Suspense loading message. Automatic federated declaration generation is disabled; the two explicit module shapes are maintained locally without weakening strict TypeScript.
+All three federation configurations share `react` and `react-dom` as singletons using the existing React version. The plugin also handles discovered React subpaths. Shell uses typed `loadRemote` calls returning a default `ComponentType`, with `React.lazy` and a minimal Suspense loading message. Automatic federated declaration generation is disabled; page module shapes are typed locally and the planning capability is defined in shared contracts without weakening strict TypeScript.
 
 ### Runtime remote locations
 
@@ -168,7 +170,7 @@ Shell fetches `remote-config.json` relative to its Vite base URL before the firs
 }
 ```
 
-For development, edit `apps/shell/public/remote-config.json`. At deployment, provide or replace `apps/shell/dist/remote-config.json` with the deployed remote entry URLs; Shell's JavaScript needs no rebuild. The server may serve this file from runtime/container configuration, but no container setup exists yet. URLs are registered once per page session; reload Shell after changing them. Remote hosting must serve the entry and its assets with appropriate cross-origin access. Vite dev and preview servers enable CORS for local composition.
+For development, edit `apps/shell/public/remote-config.json`. In Compose production, Nginx serves the separately mounted `deployment/runtime/shell.json` at `/remote-config.json`; Shell’s JavaScript needs no rebuild. Each loader registers its requested remote, and retries refetch configuration and refresh that remote’s registration. Reload Shell to test changed URLs for already loaded healthy pages. Production uses same-origin paths; separate-origin hosting must allow access to entries and assets. Vite dev and preview servers enable CORS for local composition.
 
 People displays the employee register and rate-history editor; Delivery displays project, WBS, and staffing planning. Document event transport and targeted rate-change synchronization are implemented; Shell remote areas now have independent loading, failure fallbacks, and retry.
 
@@ -209,7 +211,7 @@ Successful mutations refresh the selected history. Persisted edits and deletions
 
 ## Delivery Project Planning
 
-Delivery works standalone and through Shell using the same `DeliveryPage`. Project selection loads only that project's WBS and allocations and resets its editing context; a request guard discards stale project responses, including delayed reads that complete after a newer selection. Components use a local hook/service/repository flow and never access IndexedDB.
+Delivery works standalone and through Shell using the same `DeliveryPage`. Project selection loads that project's WBS and reads all allocations for global capacity, while presenting only the selected project's allocations. It resets the editing context; a request guard discards stale project responses, including delayed reads that complete after a newer selection. Components use a local hook/service/repository flow and never access IndexedDB.
 
 The three-level WBS is **Deliverable → WorkPackage → Activity**. Items can be created, renamed, moved to valid parents of the same project, and deleted after confirmation. Type changes and invalid nesting are rejected. Adding or moving a child beneath an allocated item is refused; deleting an item with children or allocations is refused. Nothing is silently cascaded, moved, or orphaned.
 
@@ -221,17 +223,19 @@ New allocation IDs encode `(projectId, breakdownItemId, employeeId, month)` dete
 
 The `PlanningPeopleProvider` boundary supplies employee ID, name, weekly hours, and read-only effective-dated rate snapshots. Its integration adapter resolves the public People capability through Module Federation, without People source imports or storage access. Cost is derived and editable when rates cover the whole month; no rate or cost fields are added to Delivery persistence.
 
-## Getting Started
+## Local Development
 
 ### Prerequisites
 
-- Node.js
-- npm
+- Node.js >=22.12.0
+- npm >=10
+
+These prerequisites apply to local development; Docker startup requires neither on the host.
 
 Install dependencies from the repository root:
 
 ```bash
-npm install
+npm ci
 ```
 
 ### Development
@@ -259,7 +263,7 @@ Verify composition after `npm run dev`:
 3. Open <http://localhost:5173> and click **People** to load PeoplePage inside Shell.
 4. Click **Delivery** to load DeliveryPage inside Shell.
 
-Root `dev`, `test`, and `typecheck` commands first compile the local domain/persistence packages. If building an app directly on a fresh checkout, prepare those packages first:
+Root `dev`, `test`, and `typecheck` commands first compile the local domain, contracts, and persistence packages. If building an app directly on a fresh checkout, prepare those packages first:
 
 ```bash
 npm run build:packages
@@ -343,13 +347,9 @@ Implemented:
 - Public People planning capability, injectable providers, derived Cost display/editing, and targeted rate invalidation
 - Root development and quality-check commands
 
-Not yet implemented:
-
-- Largest-remainder reconciliation
-- Failure isolation
-- Docker/container configuration
-
-These capabilities will be introduced incrementally while maintaining clear ownership between Shell, People, and Delivery.
+- Display-only largest-remainder reconciliation through WBS roots and intermediate parents
+- Independent remote loading/error boundaries and retry
+- Docker/Compose production configuration with same-origin Nginx routing
 
 ## Authoritative planning rates and Cost (Step 10)
 
@@ -357,13 +357,13 @@ People owns employees, weekly schedules, and rate histories. Delivery owns proje
 
 Shell uses its existing `remote-config.json` and runtime remote registration to load `people/PlanningRates`. It passes a capability loader to Delivery's provider adapter through the public Delivery page. Remote URLs remain runtime configuration; the same remote builds run standalone or hosted with React/react-dom singletons. Shell keeps visited pages mounted but hidden while switching tabs, preserving Delivery project/WBS/unit selection and its invalidation subscription without global application state.
 
-Standalone Delivery reads its own origin's `remote-config.json`. The supplied `{ "people": null }` explicitly selects labelled official-bootstrap names, schedules, and rates. Configure `{ "people": "<People remoteEntry URL>" }` to use the public authoritative capability instead. A configured capability failure never falls back to bootstrap rates. The owner module executes at the consuming document's origin: configured standalone Delivery reads People-owned storage at the Delivery origin, not the separate standalone People origin. Hosted People and Delivery share the Shell document's origin and owner databases.
+Standalone Delivery reads `remote-config.json` relative to its application base. The development file `apps/delivery/public/remote-config.json` uses `{ "people": null }` to select labelled official-bootstrap names, schedules, and rates; Compose production uses `deployment/runtime/delivery.json` to resolve `/people/remoteEntry.js`. Configure `{ "people": "<People remoteEntry URL>" }` to use the public authoritative capability instead. A configured capability failure never falls back to bootstrap rates. The owner module executes at the consuming document's origin: configured standalone Delivery reads People-owned storage at the Delivery origin, not the separate standalone People origin. Hosted People and Delivery share the Shell document's origin and owner databases.
 
 The contracts package provides framework-independent document `CustomEvent` publication/subscription for the existing `people.rateChanged` name. The payload is only `{ employeeId }`, an invalidation signal, never copied rate history. People publishes immediately after successful rate add/edit/delete persistence; validation or persistence failures do not publish. Delivery subscribes at its hook boundary with teardown cleanup, refetches only the affected employee through the provider, and replaces that read-only snapshot. Older targeted responses cannot overwrite newer ones. No browser reload or remote reload occurs. Allocation hours and global capacity utilization stay unchanged; derived costs and subsequent Cost input conversions use refreshed rates. Cost saves also fetch the affected employee afresh before conversion.
 
 Monthly pricing reuses `priceAllocation`: spread hours evenly over Mon–Fri dates (no holidays), choose the latest rate with inclusive `validFrom` for each date, and sum unrounded daily costs. The next rate implicitly ends the previous one; any number of rate changes works. `costToHours` prices one hour with the same engine and divides entered EUR cost by that monthly blended rate, retaining full precision. Cost is never persisted. Parent cells remain read-only and sum individually priced descendant leaf allocations without double counting or parent records. EUR display uses two decimals and the presentation-only reconciliation described below.
 
-Complete rate coverage is required to display or edit Cost. Missing coverage (including only partly covered months) shows **Cost unavailable: no applicable rate.**, with no invented €0. Invalid or failed rate data also disables Cost and displays an explicit error; PM/Hours/% remain usable. When authority fails, previously loaded names/schedules are retained; on first-load failure only official bootstrap identities/schedules are used for hour planning, with rates emptied and an unavailable-authority message. Retry People data can recover the capability. A real zero-rate month displays €0 but disables Cost editing because the inverse has no unique answer; use the other units. Event transport is document-scoped, not cross-tab/cross-origin synchronization. Shell page failures are isolated separately from this capability failure behavior.
+Complete rate coverage is required to display or edit Cost. Missing coverage (including only partly covered months) shows **Cost unavailable: no applicable rate.**, with no invented €0. Invalid or failed rate data also disables Cost and displays an explicit error; PM/Hours/% remain usable. When authority fails, previously loaded names/schedules are retained; on first-load failure only official bootstrap identities/schedules are used for hour planning, with rates emptied and an unavailable-authority message. Hosted Retry People data can recover the capability. Standalone Delivery retains a successfully parsed configuration for the page session; after correcting a configured remote URL, reload the page. A real zero-rate month displays €0 but disables Cost editing because the inverse has no unique answer; use the other units. Event transport is document-scoped, not cross-tab/cross-origin synchronization. Shell page failures are isolated separately from this capability failure behavior.
 
 The supplied Adaeze March reference is verified using the actual seed despite remaining outside the visible Apr 2026–Mar 2027 horizon: 40h/week, 22 weekdays, 176h capacity, 0.50 PM = 88h = 50%; 4h/day at €80 for eight weekdays and €95 from March 12 for fourteen weekdays gives **€7,880**, with blended rate **€89.5454545/h**. No fixture or horizon change is needed.
 
@@ -389,6 +389,6 @@ Shell navigation remains outside each remote's `RemoteErrorBoundary`. Each visit
 
 Runtime configuration is requested with `cache: no-store`. Each loader validates and registers only its own HTTP(S) URL; a missing/invalid sibling URL cannot block it. Network/status/JSON/shape failures reject into the page boundary and are not permanently cached. Entry and exposure failures likewise propagate; no hard-coded URL or fixture page substitutes for a broken configured application.
 
-**Retry People / Retry Delivery** creates a fresh lazy component and boundary, fetches configuration again, and re-registers only that remote with Federation's `force` option when already registered. A `baseline-retry` query parameter on the entry URL avoids reuse of a browser-cached rejected entry import. Healthy sibling pages are not remounted. Delivery's **Retry People data** also makes a fresh authority load after capability failure. People page and `PlanningRates` exposures remain separate: failure of the capability leaves Hours/PM/Percent usable and Cost unavailable; it does not create a Shell Delivery fallback.
+**Retry People / Retry Delivery** creates a fresh lazy component and boundary, fetches configuration again, and re-registers only that remote with Federation's `force` option when already registered. A `baseline-retry` query parameter on the entry URL avoids reuse of a browser-cached rejected entry import. Healthy sibling pages are not remounted. Hosted Delivery's **Retry People data** also makes a fresh authority load after capability failure. Standalone configuration recovery has the reload limitation described above. People page and `PlanningRates` exposures remain separate: failure of the capability leaves Hours/PM/Percent usable and Cost unavailable; it does not create a Shell Delivery fallback.
 
-Boundaries cover React rendering and rejected lazy loads, not arbitrary event-handler or asynchronous application errors; those retain their existing application handling. Retry requires a compatible reachable service and an entry endpoint that accepts query parameters. A failed transitive ESM chunk can remain cached by its unchanged URL; a full browser reload may be needed after such a deployment failure. Request timeouts, cross-tab coordination, backend work, deployment changes, and automatic retry loops are outside this step.
+Boundaries cover React rendering and rejected lazy loads, not arbitrary event-handler or asynchronous application errors; those retain their existing application handling. Retry requires a compatible reachable service and an entry endpoint that accepts query parameters. A failed transitive ESM chunk can remain cached by its unchanged URL; a full browser reload may be needed after such a deployment failure. Request timeouts, cross-tab coordination, backend APIs, and automatic retry loops are not implemented. Production deployment configuration is described under Running the application.
