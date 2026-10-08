@@ -4,7 +4,7 @@ Baseline Planning Suite is a delivery-planning application for managing people, 
 
 The application is being developed as three independently built frontend applications: **Shell**, **People**, and **Delivery**.
 
-This repository currently contains the workspace/tooling foundation, framework-independent domain types, the core allocation calculation engine, a public rate-change contract, minimal Module Federation composition, and ownership-specific IndexedDB persistence with deterministic seed data. Business functionality and micro-frontend integration will be introduced incrementally.
+This repository currently contains the workspace/tooling foundation, framework-independent domain types, the core allocation calculation engine, a public rate-change contract, Module Federation composition, ownership-specific IndexedDB persistence, and a searchable People register with rate-history editing. Business functionality and micro-frontend integration will be introduced incrementally.
 
 ## Repository Structure
 
@@ -37,7 +37,7 @@ Hosts the People and Delivery pages at runtime and provides simple navigation be
 
 Owns the people domain.
 
-It will manage the employee register, employee details, weekly working hours, roles, and effective-dated cost-rate history.
+Provides the searchable employee register, employee details, weekly hours/roles, and effective-dated rate-history add/edit/delete. Changes persist through the People repository.
 
 #### Delivery
 
@@ -133,7 +133,7 @@ Shell fetches `remote-config.json` relative to its Vite base URL before the firs
 
 For development, edit `apps/shell/public/remote-config.json`. At deployment, provide or replace `apps/shell/dist/remote-config.json` with the deployed remote entry URLs; Shell's JavaScript needs no rebuild. The server may serve this file from runtime/container configuration, but no container setup exists yet. URLs are registered once per page session; reload Shell after changing them. Remote hosting must serve the entry and its assets with appropriate cross-origin access. Vite dev and preview servers enable CORS for local composition.
 
-The pages currently display only their application names. Event transport, rate-change synchronization, and dedicated remote failure isolation remain unimplemented.
+People displays the employee register and rate-history editor; Delivery still displays only its application name. Event transport, rate-change synchronization, and dedicated remote failure isolation remain unimplemented.
 
 ## Persistence and Seed Data
 
@@ -146,7 +146,7 @@ IndexedDB is the current browser persistence mechanism. Domain-oriented reposito
 
 All stores use `id` as their key. Separate databases keep ownership and schema upgrades independent. People owns employee lookup and rate-history CRUD; Delivery owns project lookup, WBS-record upsert/delete, and canonical-hour allocation upsert/delete. Components do not manipulate IndexedDB. Repositories live under each app's `src/persistence`; none are exposed through federation. Record deletion is not an implicit cascading WBS operation.
 
-Each standalone bootstrap and federated page entry initializes its owner repository before rendering. Initialization inserts fixtures only into an empty, uninitialized owner database. Fixture writes and the `_metadata` marker commit in one transaction; simultaneous initialization is serialized. Reloads preserve edits and deletions, including a database whose user records were all deleted. Existing unmarked nonempty data is preserved without backfilling fixtures. Schema versions are explicit; future migrations must extend the upgrade path without resetting data or reapplying seeds.
+People initializes its repository through the page loading hook, showing recoverable storage errors in the UI. Delivery initializes its repository through its standalone bootstrap and federated entry before rendering. Initialization inserts fixtures only into an empty, uninitialized owner database. Fixture writes and the `_metadata` marker commit in one transaction; simultaneous initialization is serialized. Reloads preserve edits and deletions, including a database whose user records were all deleted. Existing unmarked nonempty data is preserved without backfilling fixtures. Schema versions are explicit; future migrations must extend the upgrade path without resetting data or reapplying seeds.
 
 Fixture generators are separate pure TypeScript modules with stable IDs and no randomness or current-time input:
 
@@ -157,7 +157,17 @@ Fixture generators are separate pure TypeScript modules with stable IDs and no r
 
 Delivery fixtures use the same stable `employee-01`–`employee-60` ID convention as People fixtures; this is seed-data coordination, not authoritative People-data access. Generators use existing domain types and domain calculations for reference hours.
 
-Browser storage is origin-scoped: standalone apps on separate ports have separate storage from hosted apps executing at the Shell origin. Cross-application authoritative data retrieval, `people.rateChanged` transport/publication, and live synchronization are not implemented. Repository and fixture infrastructure exists; real People/Delivery UI does not.
+Browser storage is origin-scoped: standalone apps on separate ports have separate storage from hosted apps executing at the Shell origin. Cross-application authoritative data retrieval, `people.rateChanged` transport/publication, and live synchronization are not implemented. People UI is implemented; real Delivery UI remains unimplemented.
+
+## People Register and Rate Editing
+
+People works standalone and through Shell using the same `PeoplePage`. It lists employee name, role, and weekly hours. Case-insensitive name/role search filters the loaded register locally; selecting an employee shows their details and chronological rate history, with clear loading, error, and empty states.
+
+The application service/hook owns repository calls and local React state; register, details, history, and editor components do not access IndexedDB. Users can add or edit an inclusive effective-from date and non-negative finite hourly EUR rate. Dates are validated as calendar dates without local-time conversion. An employee may have only one rate beginning on a given date; add/edit reject duplicates against freshly loaded history. Editing retains the record's employee ownership. New records use `crypto.randomUUID()` IDs, and deletion requires a native confirmation.
+
+Successful mutations refresh the selected history. Persisted edits and deletions survive browser reload without reseeding. Hourly rates display as EUR with two decimals; stored values retain entered precision. There is no end-date field or currency conversion. Duplicate-date validation is application-level, not a cross-tab transactional uniqueness constraint; simultaneous independent tabs are not coordinated.
+
+`people.rateChanged` publication/transport and Delivery synchronization remain unimplemented. Storage remains origin-scoped, so standalone People and People hosted at a different Shell origin have separate databases.
 
 ## Getting Started
 
@@ -255,7 +265,7 @@ npm run build
 
 ## Current Status
 
-Step 6 adds ownership-specific persistence repositories and deterministic fixture initialization to the existing domain engine, contracts, and federated composition.
+Step 7 adds the People employee register and persisted effective-dated rate editor to the existing repositories and federated composition.
 
 Implemented:
 
@@ -274,11 +284,12 @@ Implemented:
 - Standalone and hosted public pages, shared React singletons, and runtime remote configuration
 - Native IndexedDB infrastructure, owner repositories, and atomic one-time fixture seeding
 - Deterministic People/Delivery fixtures with focused invariant tests
+- People name/role search, employee details, chronological rate history, and validated persisted rate CRUD
+- Focused People search, validation, and repository-orchestration tests
 - Root development and quality-check commands
 
 Not yet implemented:
 
-- People register, search, and rate-editor UI
 - Delivery project and WBS UI
 - Staffing allocation UI and Cost → Hours editing
 - Capacity conflict detection, WBS roll-ups, and largest-remainder reconciliation
