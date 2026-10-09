@@ -1,13 +1,14 @@
 import { createElement } from 'react';
 import type { ComponentType } from 'react';
 import type {
+  ShellRuntimeProps,
   PlanningPeopleCapability,
   PlanningPeopleLoader,
 } from '@baseline/contracts';
 import { loadRemote, registerRemotes } from '@module-federation/runtime';
 
 interface RemotePageModule {
-  default: ComponentType;
+  default: ComponentType<ShellRuntimeProps>;
 }
 type RemoteName = 'people' | 'delivery';
 
@@ -111,13 +112,18 @@ export async function loadDeliveryPage(
 ): Promise<RemotePageModule> {
   await registerConfiguredRemote('delivery', retry);
   const module = await loadRemote<{
-    default: ComponentType<{ loadPlanningPeople?: PlanningPeopleLoader }>;
+    default: ComponentType<
+      ShellRuntimeProps & { loadPlanningPeople?: PlanningPeopleLoader }
+    >;
   }>('delivery/DeliveryPage');
   assertPage(module, 'DeliveryPage');
   const Page = module.default;
   return {
-    default: function HostedDeliveryPage() {
+    default: function HostedDeliveryPage({
+      runtimeContext,
+    }: ShellRuntimeProps) {
       return createElement(Page, {
+        runtimeContext,
         loadPlanningPeople: loadPlanningPeopleCapability,
       });
     },

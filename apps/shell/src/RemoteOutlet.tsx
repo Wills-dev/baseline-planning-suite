@@ -1,13 +1,20 @@
 import { lazy, Suspense, useState, type ComponentType } from 'react';
+import type {
+  ShellRuntimeContext,
+  ShellRuntimeProps,
+} from '@baseline/contracts';
 import { RemoteErrorBoundary } from './RemoteErrorBoundary';
 
 interface Props {
   name: string;
-  load: (retry?: boolean) => Promise<{ default: ComponentType }>;
+  runtimeContext: ShellRuntimeContext;
+  load: (
+    retry?: boolean,
+  ) => Promise<{ default: ComponentType<ShellRuntimeProps> }>;
 }
 
 /** A retry creates a new lazy component as well as a fresh boundary. */
-export function RemoteOutlet({ name, load }: Props) {
+export function RemoteOutlet({ name, load, runtimeContext }: Props) {
   const [{ attempt, Page }, setAttempt] = useState(() => ({
     attempt: 0,
     Page: lazy(() => load()),
@@ -24,7 +31,7 @@ export function RemoteOutlet({ name, load }: Props) {
       }
     >
       <Suspense fallback={<p role="status">Loading {name}…</p>}>
-        <Page />
+        <Page runtimeContext={runtimeContext} />
       </Suspense>
     </RemoteErrorBoundary>
   );

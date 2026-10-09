@@ -3,6 +3,7 @@ import { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { App } from './App';
+import type { ShellRuntimeProps } from '@baseline/contracts';
 
 const loaders = vi.hoisted(() => ({ people: vi.fn(), delivery: vi.fn() }));
 vi.mock('./remote-pages', () => ({
@@ -165,4 +166,71 @@ test('a pending remote has its own accessible loading state while the sibling re
   assertShell();
   await act(async () => finish?.({ default: () => <h2>Recovered People</h2> }));
   expect(container.textContent).toContain('Recovered People');
+});
+
+test('Shell context reaches both mounted remotes and currency updates preserve their local state', async () => {
+  const received = { people: vi.fn(), delivery: vi.fn() };
+  function People({ runtimeContext }: ShellRuntimeProps) {
+    received.people(runtimeContext);
+    const [draft] = useState('People selection retained');
+    return (
+      <section data-remote="people">
+        {draft}: {runtimeContext.activeUser.id} /{' '}
+        {runtimeContext.activeUser.name} / {runtimeContext.displayCurrency}
+      </section>
+    );
+  }
+  function Delivery({ runtimeContext }: ShellRuntimeProps) {
+    received.delivery(runtimeContext);
+    return (
+      <section data-remote="delivery">
+        <HealthyDelivery />
+        {runtimeContext.activeUser.id} / {runtimeContext.activeUser.name} /{' '}
+        {runtimeContext.displayCurrency}
+      </section>
+    );
+  }
+  loaders.people.mockResolvedValue({ default: People });
+  loaders.delivery.mockResolvedValue({ default: Delivery });
+  await mount();
+  expect(container.textContent).toContain('Active user: Alex Morgan');
+  await click('People');
+  await click('Delivery');
+  const originalPeople = container.querySelector('[data-remote="people"]');
+  const originalInput = container.querySelector('input')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      'value',
+    )!.set!.call(originalInput, 'Unsaved allocation');
+    originalInput.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const initialContext = received.people.mock.lastCall![0];
+  expect(initialContext).toEqual({
+    displayCurrency: 'EUR',
+    activeUser: { id: 'shell-planner', name: 'Alex Morgan' },
+  });
+  expect(received.delivery.mock.lastCall![0]).toBe(initialContext);
+  await act(async () => {
+    const currency = container.querySelector<HTMLSelectElement>(
+      '#shell-display-currency',
+    )!;
+    currency.value = 'USD';
+    currency.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  for (const remote of ['people', 'delivery']) {
+    expect(
+      container.querySelector(`[data-remote="${remote}"]`)?.textContent,
+    ).toContain('shell-planner / Alex Morgan / USD');
+  }
+  expect(container.querySelector('[data-remote="people"]')).toBe(
+    originalPeople,
+  );
+  expect(container.querySelector('input')).toBe(originalInput);
+  expect(originalInput.value).toBe('Unsaved allocation');
+  expect(received.people.mock.lastCall![0].activeUser).toBe(
+    initialContext.activeUser,
+  );
+  expect(loaders.people).toHaveBeenCalledTimes(1);
+  expect(loaders.delivery).toHaveBeenCalledTimes(1);
 });

@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { renderToStaticMarkup } from 'react-dom/server';
+import type { ShellRuntimeProps } from '@baseline/contracts';
 import { createElement, type ComponentType } from 'react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 const runtime = vi.hoisted(() => ({
@@ -137,7 +139,12 @@ test('Delivery page resolves before any People capability call, whose failure st
     hosted.default as (
       props: object,
     ) => React.ReactElement<{ loadPlanningPeople: () => Promise<unknown> }>
-  )({});
+  )({
+    runtimeContext: {
+      displayCurrency: 'EUR',
+      activeUser: { id: 'test', name: 'Test user' },
+    },
+  });
   expect(element.type).toBe(Page as ComponentType);
   runtime.loadRemote.mockRejectedValueOnce(new Error('capability offline'));
   await expect(element.props.loadPlanningPeople()).rejects.toThrow(
@@ -180,4 +187,27 @@ test('simultaneous loaders resolve independently using one configuration request
   expect(results[0]?.status).toBe('rejected');
   expect(results[1]?.status).toBe('fulfilled');
   expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+test('federated page loaders forward runtime context without losing the Delivery capability injection', async () => {
+  const received = vi.fn();
+  function Remote(props: ShellRuntimeProps & { loadPlanningPeople?: unknown }) {
+    received(props);
+    return createElement('p', null, props.runtimeContext.activeUser.name);
+  }
+  runtime.loadRemote.mockResolvedValue({ default: Remote });
+  const runtimeContext = {
+    displayCurrency: 'GBP' as const,
+    activeUser: { id: 'host-user', name: 'Host user' },
+  };
+  for (const load of [loaders.loadPeoplePage, loaders.loadDeliveryPage]) {
+    const { default: Hosted } = await load();
+    expect(
+      renderToStaticMarkup(createElement(Hosted, { runtimeContext })),
+    ).toContain('Host user');
+    expect(received.mock.lastCall![0].runtimeContext).toBe(runtimeContext);
+  }
+  expect(received.mock.lastCall![0].loadPlanningPeople).toBe(
+    loaders.loadPlanningPeopleCapability,
+  );
 });

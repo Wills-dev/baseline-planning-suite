@@ -1,3 +1,4 @@
+import type { ShellRuntimeProps } from '@baseline/contracts';
 import { useState } from 'react';
 import type { RateRecord } from '@baseline/domain';
 import { searchEmployees } from './application/people-service';
@@ -8,7 +9,7 @@ import { RateHistory } from './components/RateHistory';
 import { RateEditor } from './components/RateEditor';
 import './people.css';
 
-export default function PeoplePage() {
+export default function PeoplePage({ runtimeContext }: ShellRuntimeProps) {
   const people = usePeople();
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState<RateRecord | null>(null);
@@ -17,6 +18,15 @@ export default function PeoplePage() {
       <header>
         <h1>Baseline Planning — People</h1>
         <p>Employees and effective-dated hourly cost rates.</p>
+        <p>
+          Active user: {runtimeContext.activeUser.name} · Display currency:{' '}
+          {runtimeContext.displayCurrency}.
+        </p>
+        {runtimeContext.displayCurrency !== 'EUR' && (
+          <p>
+            Amounts remain in EUR; no exchange-rate conversion is configured.
+          </p>
+        )}
       </header>
       {people.loading ? (
         <p role="status">Loading employees…</p>

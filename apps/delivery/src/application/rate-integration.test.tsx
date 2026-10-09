@@ -7,6 +7,10 @@ import { publishPeopleRateChanged } from '@baseline/contracts';
 import type { DeliveryRepository } from '../persistence/delivery-repository';
 import DeliveryPage from '../DeliveryPage';
 
+const runtimeContext = {
+  displayCurrency: 'EUR' as const,
+  activeUser: { id: 'test-user', name: 'Test user' },
+};
 let repository: DeliveryRepository;
 vi.mock('../persistence/delivery-repository', () => ({
   createDeliveryRepository: () => repository,
@@ -80,7 +84,10 @@ test('document invalidation targets one employee and updates Cost without losing
       createElement(
         StrictMode,
         null,
-        createElement(DeliveryPage, { loadPlanningPeople: load }),
+        createElement(DeliveryPage, {
+          loadPlanningPeople: load,
+          runtimeContext,
+        }),
       ),
     ),
   );
@@ -97,6 +104,27 @@ test('document invalidation targets one employee and updates Cost without losing
     'input[aria-label="Employee, 2026-04, Work, Cost"]',
   )!;
   expect(Number(cell.value)).toBeCloseTo(7040, 10);
+  await act(async () =>
+    root.render(
+      createElement(
+        StrictMode,
+        null,
+        createElement(DeliveryPage, {
+          loadPlanningPeople: load,
+          runtimeContext: {
+            ...runtimeContext,
+            displayCurrency: 'USD',
+            activeUser: { id: 'shell-user', name: 'Shell planner' },
+          },
+        }),
+      ),
+    ),
+  );
+  expect(container.textContent).toContain('Shell planner');
+  expect(container.textContent).toContain('Display currency: USD');
+  expect(container.textContent).toContain('Amounts remain in EUR');
+  expect(Number(cell.value)).toBeCloseTo(7040, 10);
+  expect(repository.saveAllocation).not.toHaveBeenCalled();
   rate = 95;
   await act(async () => publishPeopleRateChanged({ employeeId: 'e' }));
   expect(capability.getPlanningPerson).toHaveBeenCalledExactlyOnceWith('e');
@@ -121,7 +149,9 @@ test('document invalidation targets one employee and updates Cost without losing
   await act(async () => publishPeopleRateChanged({ employeeId: 'e' }));
   expect(capability.getPlanningPerson).toHaveBeenCalledTimes(1);
   await act(async () =>
-    root.render(createElement(DeliveryPage, { loadPlanningPeople: load })),
+    root.render(
+      createElement(DeliveryPage, { loadPlanningPeople: load, runtimeContext }),
+    ),
   );
   await act(async () => publishPeopleRateChanged({ employeeId: 'e' }));
   expect(capability.getPlanningPerson).toHaveBeenCalledTimes(2);

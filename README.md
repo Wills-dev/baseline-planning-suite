@@ -70,7 +70,7 @@ baseline-planning-suite/
 
 The application shell.
 
-Owns runtime composition, navigation, and independent remote loading/error/retry areas. Active-user management and selectable display currency are not implemented; current rate and Cost views use EUR.
+Owns navigation, runtime composition, active user, display currency, and independent remote loading/error/retry areas. It passes a typed runtime context to both public pages; current monetary amounts remain EUR.
 
 #### People
 
@@ -136,7 +136,7 @@ The applications do not import each other's internal source code. Shared functio
 
 ## Shared Communication Contracts
 
-People owns employee information, weekly hours, roles, and authoritative rate history. Delivery owns planning, allocations, capacity, and pricing views; Shell owns runtime composition and navigation. Active-user management and currency selection are outside the current implementation. Applications must not import one another's internal source code.
+People owns employee information, weekly hours, roles, and authoritative rate history. Delivery owns planning, allocations, capacity, and pricing views; Shell owns runtime composition, navigation, active user, and display currency. Applications must not import one another's internal source code.
 
 `packages/contracts` exports the framework-independent `PeopleRateChangedEvent` type:
 
@@ -152,6 +152,12 @@ const event: PeopleRateChangedEvent = {
 This invalidation contract carries only the employee ID, never a rate snapshot or Delivery-specific instructions. DOM-safe document event helpers publish and subscribe to `people.rateChanged`. People publishes after successful persistence; Delivery refetches the affected employee through `./PlanningRates` and recalculates derived Cost without changing canonical hours.
 
 The contracts package has no React or application dependencies. The domain package remains independent of contracts and application integration concerns.
+
+## Shell runtime context
+
+Shell owns `ShellRuntimeContext` in React state: `displayCurrency` (`EUR | USD | GBP`) and a deterministic `activeUser` (`id`, `name`; Alex Morgan). The required `runtimeContext` prop is published through `@baseline/contracts` and passed to People and Delivery through their federated page APIs. Changing Shell’s currency selector updates mounted remotes without reload or lost selections; remotes consume props without copying Shell state. No authentication is implemented.
+
+People and Delivery display the active user and selected currency preference. Rates and allocation costs remain EUR: no FX data or conversion rule is supplied, so selecting USD/GBP shows an explicit no-conversion notice rather than relabelling EUR amounts or changing canonical hours. Standalone `App` composition roots supply EUR and clearly named local users; the public page components require context and never invent hosted defaults. PlanningRates and rate-change events remain independent of this presentation context.
 
 ## Module Federation
 

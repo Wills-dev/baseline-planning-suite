@@ -8,3 +8,9 @@ export type {
   PlanningPeopleCapability,
   PlanningPeopleLoader,
 } from './planning-people.js';
+
+export type {
+  DisplayCurrency,
+  ShellRuntimeContext,
+  ShellRuntimeProps,
+} from './shell-runtime.js';
