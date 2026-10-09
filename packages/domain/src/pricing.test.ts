@@ -40,6 +40,7 @@ describe('monthly allocation pricing', () => {
     const result = priceAllocation({ ...allocation, hours }, rates);
     expect(days).toHaveLength(22);
     expect(capacity).toBe(176);
+    expect(personMonthsToHours(1, capacity)).toBe(176);
     expect(hours).toBe(88);
     expect(hoursToPercent(hours, capacity)).toBe(50);
     expect(result.hoursPerWorkingDay).toBe(4);
@@ -59,6 +60,9 @@ describe('monthly allocation pricing', () => {
     expect(blendedHourlyRate(result.totalCostEUR, hours)).toBeCloseTo(
       89.54545454545455,
       12,
+    );
+    expect(blendedHourlyRate(result.totalCostEUR, hours).toFixed(4)).toBe(
+      '89.5455',
     );
     expect(allocation.hours).toBe(88);
     expect(rates.map((rate) => rate.id)).toEqual(['new', 'old']);

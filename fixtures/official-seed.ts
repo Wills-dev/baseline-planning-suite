@@ -54,7 +54,10 @@ function nonNegativeFinite(value: number, field: string): void {
   if (!Number.isFinite(value) || value < 0)
     throw new Error(`Seed ${field} must be finite and non-negative`);
 }
-export function mapOfficialSeed(seed: RawBaselineSeed) {
+/** People bootstrap validates only People-owned collections. */
+export function mapPeopleSeed(
+  seed: Pick<RawBaselineSeed, 'employees' | 'rateRecords'>,
+) {
   const employees: Employee[] = seed.employees.map((employee) => {
     const weeklyHours = employee.weeklyHours;
     if (weeklyHours !== 20 && weeklyHours !== 32 && weeklyHours !== 40)
@@ -73,6 +76,25 @@ export function mapOfficialSeed(seed: RawBaselineSeed) {
       hourlyCostEUR: rate.hourlyCost,
     };
   });
+  return { employees, rateRecords };
+}
+
+/** Delivery needs only employee IDs/schedules to convert bootstrap PM into hours. */
+export function mapDeliverySeed(
+  seed: Pick<RawBaselineSeed, 'projects' | 'breakdownItems' | 'allocations'> & {
+    employees: readonly Pick<
+      RawBaselineSeed['employees'][number],
+      'id' | 'weeklyHours'
+    >[];
+  },
+) {
+  const people = new Map(
+    seed.employees.map(({ id, weeklyHours }) => {
+      if (weeklyHours !== 20 && weeklyHours !== 32 && weeklyHours !== 40)
+        throw new Error('Unsupported seed schedule');
+      return [id, { id, weeklyHours }] as const;
+    }),
+  );
   const projects: Project[] = seed.projects.map((project) => ({
     ...project,
     startDate: date(project.startDate),
@@ -131,8 +153,13 @@ export function mapOfficialSeed(seed: RawBaselineSeed) {
       ),
     };
   });
-  const from = month(seed.meta.gridHorizon.from);
-  const to = month(seed.meta.gridHorizon.to);
+  return { projects, breakdownItems, allocations };
+}
+
+/** Horizon extraction is independent of every domain collection. */
+export function mapPlanningMonths(meta: RawBaselineSeed['meta']): YearMonth[] {
+  const from = month(meta.gridHorizon.from);
+  const to = month(meta.gridHorizon.to);
   const planningMonths: YearMonth[] = [];
   const cursor = parseDateOnly(`${from}-01`);
   for (
@@ -143,13 +170,15 @@ export function mapOfficialSeed(seed: RawBaselineSeed) {
     planningMonths.push(month(cursor.toISOString().slice(0, 7)));
   if (planningMonths.length !== 12)
     throw new Error('Expected twelve seed planning months');
+  return planningMonths;
+}
+
+/** Full mapping remains available for fixture invariants and explicit standalone composition. */
+export function mapOfficialSeed(seed: RawBaselineSeed) {
   return {
-    employees,
-    rateRecords,
-    projects,
-    breakdownItems,
-    allocations,
-    planningMonths,
+    ...mapPeopleSeed(seed),
+    ...mapDeliverySeed(seed),
+    planningMonths: mapPlanningMonths(seed.meta),
   };
 }
 export const officialSeedVersion = `official-${rawSeed.meta.version}`;
@@ -157,5 +186,12 @@ export function createOfficialFixtures() {
   return mapOfficialSeed(rawSeed);
 }
 export const planningMonths: readonly YearMonth[] = Object.freeze(
-  createOfficialFixtures().planningMonths,
+  mapPlanningMonths(rawSeed.meta),
 );
+
+export function createOfficialPeopleFixtures() {
+  return mapPeopleSeed(rawSeed);
+}
+export function createOfficialDeliveryFixtures() {
+  return mapDeliverySeed(rawSeed);
+}
