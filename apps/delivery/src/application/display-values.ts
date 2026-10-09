@@ -1,6 +1,7 @@
 import {
   displayScale,
   reconcileRoundedUnits,
+  reconcileRoundedMatrixUnits,
   type Allocation,
   type AllocationUnit,
   type BreakdownItem,
@@ -84,7 +85,7 @@ export function reconcileWbsDisplay(
 }
 
 /** Price each leaf allocation before aggregation; canonical hours are never changed. */
-export function derivePlanningDisplay(
+function deriveExactPlanningValues(
   tree: readonly WbsNode[],
   allocations: readonly Allocation[],
   person: PlanningPerson,
@@ -128,7 +129,109 @@ export function derivePlanningDisplay(
     }
   }
   leaves(tree);
-  return reconcileWbsDisplay(tree, leafValues, displayPrecision[unit]);
+  return leafValues;
+}
+
+/** Existing single-month API retains its hierarchy reconciliation. */
+export function derivePlanningDisplay(
+  tree: readonly WbsNode[],
+  allocations: readonly Allocation[],
+  person: PlanningPerson,
+  month: YearMonth,
+  unit: AllocationUnit,
+): Map<string, number | null> {
+  return reconcileWbsDisplay(
+    tree,
+    deriveExactPlanningValues(tree, allocations, person, month, unit),
+    displayPrecision[unit],
+  );
+}
+
+export interface PlanningDisplayRow {
+  months: ReadonlyMap<YearMonth, number | null>;
+  total: number | null;
+}
+
+/** One display snapshot for the whole horizon, independent of selected WBS node.
+ * Integer margins conserve both month columns and row totals through the hierarchy.
+ * Unavailable values propagate; known siblings/months remain visible.
+ */
+export function derivePlanningGridDisplay(
+  tree: readonly WbsNode[],
+  allocations: readonly Allocation[],
+  person: PlanningPerson,
+  months: readonly YearMonth[],
+  unit: AllocationUnit,
+): Map<string, PlanningDisplayRow> {
+  const precision = displayPrecision[unit],
+    scale = displayScale(precision);
+  const leaves = months.map((month) =>
+    deriveExactPlanningValues(tree, allocations, person, month, unit),
+  );
+  const exact = new Map<string, (number | null)[]>();
+  function calculate(node: WbsNode): (number | null)[] {
+    const children = node.children.map(calculate);
+    const values = months.map((_, index) => {
+      if (!children.length) return leaves[index]!.get(node.item.id) ?? null;
+      const parts = children.map((child) => child[index] ?? null);
+      return parts.some((value) => value === null)
+        ? null
+        : parts.reduce<number>((sum, value) => sum + (value ?? 0), 0);
+    });
+    exact.set(node.item.id, values);
+    return values;
+  }
+  tree.forEach(calculate);
+  const result = new Map<string, PlanningDisplayRow>();
+  function assign(node: WbsNode, assigned?: number[]): void {
+    const values = exact.get(node.item.id)!;
+    if (values.some((value) => value === null)) {
+      node.children.forEach((child) => assign(child));
+      const available = values.filter(
+        (value): value is number => value !== null,
+      );
+      const rounded = reconcileRoundedUnits(available, precision);
+      let availableIndex = 0;
+      const monthly = values.map((value, index) =>
+        value === null
+          ? null
+          : node.children.length
+            ? node.children.reduce(
+                (sum, child) =>
+                  sum +
+                  Math.round(
+                    result.get(child.item.id)!.months.get(months[index]!)! *
+                      scale,
+                  ),
+                0,
+              ) / scale
+            : rounded[availableIndex++]! / scale,
+      );
+      result.set(node.item.id, {
+        months: new Map(months.map((month, index) => [month, monthly[index]!])),
+        total: null,
+      });
+      return;
+    }
+    const numeric = values as number[];
+    const units = assigned ?? reconcileRoundedUnits(numeric, precision);
+    result.set(node.item.id, {
+      months: new Map(
+        months.map((month, index) => [month, units[index]! / scale]),
+      ),
+      total: units.reduce((sum, value) => sum + value, 0) / scale,
+    });
+    if (node.children.length) {
+      const children = reconcileRoundedMatrixUnits(
+        node.children.map((child) => exact.get(child.item.id)! as number[]),
+        precision,
+        units,
+      );
+      node.children.forEach((child, index) => assign(child, children[index]));
+    }
+  }
+  tree.forEach((node) => assign(node));
+  return result;
 }
 
 export function deriveWbsHoursDisplay(

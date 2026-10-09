@@ -7,6 +7,10 @@ import { publishPeopleRateChanged } from '@baseline/contracts';
 import type { DeliveryRepository } from '../persistence/delivery-repository';
 import DeliveryPage from '../DeliveryPage';
 
+const runtimeContext = {
+  displayCurrency: 'EUR' as const,
+  activeUser: { id: 'test-user', name: 'Test user' },
+};
 let repository: DeliveryRepository;
 vi.mock('../persistence/delivery-repository', () => ({
   createDeliveryRepository: () => repository,
@@ -80,7 +84,10 @@ test('document invalidation targets one employee and updates Cost without losing
       createElement(
         StrictMode,
         null,
-        createElement(DeliveryPage, { loadPlanningPeople: load }),
+        createElement(DeliveryPage, {
+          loadPlanningPeople: load,
+          runtimeContext,
+        }),
       ),
     ),
   );
@@ -97,6 +104,27 @@ test('document invalidation targets one employee and updates Cost without losing
     'input[aria-label="Employee, 2026-04, Work, Cost"]',
   )!;
   expect(Number(cell.value)).toBeCloseTo(7040, 10);
+  await act(async () =>
+    root.render(
+      createElement(
+        StrictMode,
+        null,
+        createElement(DeliveryPage, {
+          loadPlanningPeople: load,
+          runtimeContext: {
+            ...runtimeContext,
+            displayCurrency: 'USD',
+            activeUser: { id: 'shell-user', name: 'Shell planner' },
+          },
+        }),
+      ),
+    ),
+  );
+  expect(container.textContent).toContain('Shell planner');
+  expect(container.textContent).toContain('Display currency: USD');
+  expect(container.textContent).toContain('Amounts remain in EUR');
+  expect(Number(cell.value)).toBeCloseTo(7040, 10);
+  expect(repository.saveAllocation).not.toHaveBeenCalled();
   rate = 95;
   await act(async () => publishPeopleRateChanged({ employeeId: 'e' }));
   expect(capability.getPlanningPerson).toHaveBeenCalledExactlyOnceWith('e');
@@ -121,8 +149,70 @@ test('document invalidation targets one employee and updates Cost without losing
   await act(async () => publishPeopleRateChanged({ employeeId: 'e' }));
   expect(capability.getPlanningPerson).toHaveBeenCalledTimes(1);
   await act(async () =>
-    root.render(createElement(DeliveryPage, { loadPlanningPeople: load })),
+    root.render(
+      createElement(DeliveryPage, { loadPlanningPeople: load, runtimeContext }),
+    ),
   );
   await act(async () => publishPeopleRateChanged({ employeeId: 'e' }));
   expect(capability.getPlanningPerson).toHaveBeenCalledTimes(2);
+});
+
+test('initial hosted authority failure shows no invented staffing values and retry restores authoritative rows without writing allocations', async () => {
+  const person = {
+    employeeId: 'e',
+    name: 'Owner employee',
+    weeklyHours: 20 as const,
+    rates: [
+      {
+        id: 'r',
+        employeeId: 'e',
+        validFrom: '2025-01-01' as const,
+        hourlyCostEUR: 95,
+      },
+    ],
+  };
+  const load = vi
+    .fn<() => Promise<PlanningPeopleCapability>>()
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValue({
+      listPlanningPeople: async () => [person],
+      getPlanningPerson: async () => person,
+    });
+  await act(async () =>
+    root.render(
+      createElement(DeliveryPage, { loadPlanningPeople: load, runtimeContext }),
+    ),
+  );
+  await change('#delivery-project', 'p');
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>(
+        'button[aria-label="Select Deliverable: Work"]',
+      )!
+      .click(),
+  );
+  expect(container.textContent).toContain(
+    'Authoritative People data unavailable',
+  );
+  expect(container.textContent).toContain('No planning people are available');
+  expect(container.textContent).not.toContain('Adaeze');
+  expect(container.querySelector('input[aria-label*="2026-04"]')).toBeNull();
+  // Canonical WBS hours still render without a People-owned schedule.
+  expect(container.textContent).toContain('88.00');
+  const retry = [...container.querySelectorAll('button')].find(
+    (button) => button.textContent === 'Retry People data',
+  )!;
+  await act(async () => retry.click());
+  expect(container.textContent).toContain('Owner employee');
+  expect(container.textContent).not.toContain(
+    'Authoritative People data unavailable',
+  );
+  await change('#allocation-unit', 'Hours');
+  expect(
+    container.querySelector<HTMLInputElement>(
+      'input[aria-label="Owner employee, 2026-04, Work, Hours"]',
+    )?.value,
+  ).toBe('88.00');
+  expect(repository.saveAllocation).not.toHaveBeenCalled();
+  expect(repository.deleteAllocation).not.toHaveBeenCalled();
 });

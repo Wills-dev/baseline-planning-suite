@@ -53,7 +53,8 @@ export function createDeliveryRepository(): DeliveryRepository {
     listAllocations: () => database.list('allocations'),
     listProjectAllocations: (projectId) =>
       database.listByIndex('allocations', 'projectId', projectId),
-    saveAllocation: (allocation) => database.put('allocations', allocation),
+    saveAllocation: (allocation) =>
+      database.putSequenced('allocations', allocation, 'editSequence'),
     deleteAllocation: (id) => database.delete('allocations', id),
     close: database.close,
   };

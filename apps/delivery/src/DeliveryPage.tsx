@@ -1,4 +1,7 @@
-import type { PlanningPeopleLoader } from '@baseline/contracts';
+import type {
+  PlanningPeopleLoader,
+  ShellRuntimeProps,
+} from '@baseline/contracts';
 import { useDelivery } from './application/use-delivery';
 import { ProjectSelector } from './components/ProjectSelector';
 import { ProjectPlanningPanel } from './components/ProjectPlanningPanel';
@@ -6,7 +9,8 @@ import './delivery.css';
 
 export default function DeliveryPage({
   loadPlanningPeople,
-}: {
+  runtimeContext,
+}: ShellRuntimeProps & {
   loadPlanningPeople?: PlanningPeopleLoader;
 }) {
   const planning = useDelivery(loadPlanningPeople);
@@ -15,6 +19,15 @@ export default function DeliveryPage({
       <header>
         <h1>Baseline Planning — Delivery</h1>
         <p>Project work breakdown and canonical-hour staffing plans.</p>
+        <p>
+          Active user: {runtimeContext.activeUser.name} · Display currency:{' '}
+          {runtimeContext.displayCurrency}.
+        </p>
+        {runtimeContext.displayCurrency !== 'EUR' && (
+          <p>
+            Amounts remain in EUR; no exchange-rate conversion is configured.
+          </p>
+        )}
       </header>
       {planning.peopleStatus && (
         <p

@@ -1,8 +1,12 @@
 import { expect, test } from 'vitest';
 import rawSeed from '../../../../fixtures/baseline-seed.json';
 import {
+  type RawBaselineSeed,
   createOfficialFixtures,
   mapOfficialSeed,
+  mapDeliverySeed,
+  mapPeopleSeed,
+  mapPlanningMonths,
 } from '../../../../fixtures/official-seed';
 import {
   getWorkingDays,
@@ -187,4 +191,60 @@ test('accepts zero external amounts and hourly costs without mutating supplied i
   expect(mapped.allocations[0]?.hours).toBe(0);
   expect(mapped.rateRecords[0]?.hourlyCostEUR).toBe(0);
   expect(seed).toEqual(before);
+});
+
+test('owner-specific bootstrap outputs exactly match the full official mapping', () => {
+  const full = mapOfficialSeed(rawSeed);
+  expect(mapPeopleSeed(rawSeed)).toEqual({
+    employees: full.employees,
+    rateRecords: full.rateRecords,
+  });
+  expect(mapDeliverySeed(rawSeed)).toEqual({
+    projects: full.projects,
+    breakdownItems: full.breakdownItems,
+    allocations: full.allocations,
+  });
+  expect(createDeliveryFixtures()).toEqual(mapDeliverySeed(rawSeed));
+});
+
+test('Delivery conversion reads schedules, never People identities or rate histories', () => {
+  const seed = {
+    ...rawSeed,
+    employees: rawSeed.employees.map(({ id, weeklyHours }) => ({
+      id,
+      weeklyHours,
+      get name(): string {
+        throw new Error('People identity accessed');
+      },
+      get role(): string {
+        throw new Error('People role accessed');
+      },
+    })),
+    get rateRecords(): RawBaselineSeed['rateRecords'] {
+      throw new Error('People rates accessed');
+    },
+  };
+  const mapped = mapDeliverySeed(seed);
+  expect(mapped).toEqual(createDeliveryFixtures());
+  expect(
+    mapped.allocations.find((allocation) => allocation.id === 'alloc-001')
+      ?.hours,
+  ).toBe(88);
+});
+
+test('People mapping and horizon extraction do not validate unrelated Delivery collections', () => {
+  const seed = {
+    ...rawSeed,
+    get projects(): RawBaselineSeed['projects'] {
+      throw new Error('Delivery projects accessed');
+    },
+    get breakdownItems(): RawBaselineSeed['breakdownItems'] {
+      throw new Error('Delivery WBS accessed');
+    },
+    get allocations(): RawBaselineSeed['allocations'] {
+      throw new Error('Delivery allocations accessed');
+    },
+  };
+  expect(mapPeopleSeed(seed)).toEqual(mapPeopleSeed(rawSeed));
+  expect(mapPlanningMonths(seed.meta)).toEqual(planningMonths);
 });

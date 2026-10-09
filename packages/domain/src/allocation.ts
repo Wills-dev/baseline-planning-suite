@@ -11,4 +11,6 @@ export interface Allocation {
   /** Calendar month (YYYY-MM). */
   month: YearMonth;
   hours: number;
+  /** Persisted commit order; absent for legacy/fixture records with unknown edit history. */
+  editSequence?: number;
 }

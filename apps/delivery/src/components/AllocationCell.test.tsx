@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { AllocationCell } from './AllocationCell';
 import { StaffingGrid } from './StaffingGrid';
+import type { RateRecord } from '@baseline/domain';
 import type { EditableUnit } from '../application/allocation-values';
 
 let container: HTMLDivElement;
@@ -206,14 +207,20 @@ test('parent Cost sums individually priced descendants and stays read-only; miss
     },
   ];
   const onSave = vi.fn(async () => true);
-  async function grid(rates = person.rates) {
+  async function grid(
+    rates: RateRecord[] = person.rates,
+    selectedId = 'parent',
+    rateDataError?: string,
+  ) {
     await act(async () =>
       root.render(
         createElement(StaffingGrid, {
-          selectedId: 'parent',
+          selectedId,
           items,
           allocations,
-          people: [{ ...person, rates }],
+          people: [
+            { ...person, rates, ...(rateDataError ? { rateDataError } : {}) },
+          ],
           planningMonths: ['2026-03'],
           unit: 'Cost',
           disabled: false,
@@ -233,6 +240,38 @@ test('parent Cost sums individually priced descendants and stays read-only; miss
     'Cost unavailable: no applicable rate.',
   );
   expect(container.textContent).not.toContain('€0');
+  const future: RateRecord[] = [
+    { ...person.rates[0]!, validFrom: '2026-04-01' },
+  ];
+  for (const selectedId of ['a', 'parent']) {
+    await grid(future, selectedId);
+    const output = container.querySelector('output')!;
+    expect(output.textContent).toBe('€0.00');
+    const mark = container.querySelector('.delivery-before-first-rate')!;
+    expect(mark.textContent).toContain('month before first rate');
+    expect(mark.getAttribute('title')).toContain(
+      "employee's first rate record",
+    );
+    expect(output.getAttribute('aria-describedby')?.split(' ')).toContain(
+      mark.id,
+    );
+  }
+  await grid(
+    person.rates.map((rate) => ({ ...rate, hourlyCostEUR: 0 })),
+    'a',
+  );
+  expect(container.querySelector('output')?.textContent).toBe('€0.00');
+  expect(container.querySelector('.delivery-before-first-rate')).toBeNull();
+  await grid(future, 'parent', 'People authority unavailable');
+  expect(container.textContent).toContain('People authority unavailable');
+  expect(container.querySelector('.delivery-before-first-rate')).toBeNull();
+  expect(
+    container.querySelector('.delivery-row-total output')?.textContent,
+  ).toBe('Cost unavailable');
+  expect(
+    container.querySelector('td:not(.delivery-row-total) output'),
+  ).toBeNull();
+  expect(onSave).not.toHaveBeenCalled();
 });
 
 test('global capacity warnings remain accessible on editable and read-only cells', async () => {
@@ -313,7 +352,7 @@ test('exact over-capacity status still warns when display rounds to 100.0%', asy
         onSave: async () => true,
         capacityStatus: {
           employeeId: 'e',
-          month: '2026-06',
+          month: '2026-06' as const,
           allocatedHours: 176.0704,
           capacityHours: 176,
           utilizationPercent: 100.04,
@@ -324,4 +363,91 @@ test('exact over-capacity status still warns when display rounds to 100.0%', asy
   );
   expect(input().value).toBe('33.4');
   expect(container.textContent).toContain('Over capacity: 100.0%');
+});
+
+test('visible TOTAL reconciles monthly cells in all units, is read-only, preserves R5 attribution and never saves on unit switching', async () => {
+  const onSave = vi.fn(async () => true);
+  const records = ['2026-04', '2026-05', '2026-06'].map((month, index) => ({
+    id: String(index),
+    projectId: 'p',
+    breakdownItemId: 'leaf',
+    employeeId: 'e',
+    month: month as '2026-04' | '2026-05' | '2026-06',
+    hours: 88.00371429 + index * 0.00581231,
+  }));
+  const before = structuredClone(records);
+  for (const unit of ['Hours', 'PM', 'Percent', 'Cost'] as const) {
+    await act(async () =>
+      root.render(
+        createElement(StaffingGrid, {
+          selectedId: 'leaf',
+          items: [
+            { id: 'leaf', projectId: 'p', name: 'Work', type: 'Deliverable' },
+          ],
+          allocations: records,
+          people: [
+            {
+              employeeId: 'e',
+              name: 'Employee',
+              weeklyHours: 40,
+              rates: [
+                {
+                  id: 'r',
+                  employeeId: 'e',
+                  validFrom: '2025-01-01',
+                  hourlyCostEUR: 89.12345,
+                },
+              ],
+            },
+          ],
+          planningMonths: ['2026-04', '2026-05', '2026-06'],
+          unit,
+          disabled: false,
+          onSave,
+          capacityStatuses: new Map([
+            [
+              '["e","2026-06"]',
+              {
+                employeeId: 'e',
+                month: '2026-06' as const,
+                capacityHours: 176,
+                allocatedHours: 220,
+                utilizationPercent: 125,
+                overAllocated: true,
+              },
+            ],
+          ]),
+          latestCapacityEdits: new Map([
+            [
+              '["e","2026-06"]',
+              {
+                projectId: 'p',
+                breakdownItemId: 'leaf',
+                assignmentName: 'Project / Work',
+              },
+            ],
+          ]),
+        }),
+      ),
+    );
+    expect(
+      container.querySelector('thead .delivery-row-total')!.textContent,
+    ).toBe('TOTAL');
+    const scale = unit === 'Percent' ? 10 : 100;
+    const total = Number(
+      container
+        .querySelector('.delivery-row-total output')!
+        .textContent!.replace(/[€,]/g, ''),
+    );
+    const sum = [
+      ...container.querySelectorAll<HTMLInputElement>('td input'),
+    ].reduce((sum, input) => sum + Math.round(Number(input.value) * scale), 0);
+    expect(sum).toBe(Math.round(total * scale));
+    expect(container.querySelector('.delivery-row-total input')).toBeNull();
+    expect(container.textContent).toContain(
+      'Latest contributing assignment: Project / Work',
+    );
+  }
+  expect(records).toEqual(before);
+  expect(onSave).not.toHaveBeenCalled();
 });

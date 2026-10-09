@@ -15,7 +15,9 @@ COPY . .
 RUN npm run build:packages \
     && npm run build --workspace @baseline/shell \
     && BASELINE_PUBLIC_BASE=/people/ npm run build --workspace @baseline/people \
-    && BASELINE_PUBLIC_BASE=/delivery/ npm run build --workspace @baseline/delivery
+    && BASELINE_PUBLIC_BASE=/delivery/ npm run build --workspace @baseline/delivery \
+    && test -s apps/people/dist/remoteEntry.js \
+    && test -s apps/delivery/dist/remoteEntry.js
 
 FROM nginx:1.28-alpine AS runtime
 COPY deployment/nginx.conf /etc/nginx/conf.d/default.conf

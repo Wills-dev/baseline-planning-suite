@@ -1,3 +1,8 @@
+import { useCapacity } from './application/use-capacity';
+import type {
+  ShellRuntimeProps,
+  DeliveryCapacityLoader,
+} from '@baseline/contracts';
 import { useState } from 'react';
 import type { RateRecord } from '@baseline/domain';
 import { searchEmployees } from './application/people-service';
@@ -8,8 +13,12 @@ import { RateHistory } from './components/RateHistory';
 import { RateEditor } from './components/RateEditor';
 import './people.css';
 
-export default function PeoplePage() {
+export default function PeoplePage({
+  runtimeContext,
+  loadCapacity,
+}: ShellRuntimeProps & { loadCapacity?: DeliveryCapacityLoader }) {
   const people = usePeople();
+  const capacity = useCapacity(people.employees, loadCapacity);
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState<RateRecord | null>(null);
   return (
@@ -17,6 +26,15 @@ export default function PeoplePage() {
       <header>
         <h1>Baseline Planning — People</h1>
         <p>Employees and effective-dated hourly cost rates.</p>
+        <p>
+          Active user: {runtimeContext.activeUser.name} · Display currency:{' '}
+          {runtimeContext.displayCurrency}.
+        </p>
+        {runtimeContext.displayCurrency !== 'EUR' && (
+          <p>
+            Amounts remain in EUR; no exchange-rate conversion is configured.
+          </p>
+        )}
       </header>
       {people.loading ? (
         <p role="status">Loading employees…</p>
@@ -34,6 +52,9 @@ export default function PeoplePage() {
       ) : (
         <div className="people-layout">
           <EmployeeRegister
+            capacityStatuses={capacity.statuses}
+            capacityMessage={capacity.message}
+            onRetryCapacity={() => void capacity.refresh()}
             employees={searchEmployees(people.employees, query)}
             query={query}
             onQueryChange={setQuery}

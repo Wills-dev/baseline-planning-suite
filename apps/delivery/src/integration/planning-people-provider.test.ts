@@ -4,6 +4,11 @@ import {
   createCapabilityPlanningPeopleProvider,
   createRuntimePlanningPeopleProvider,
 } from './planning-people-provider';
+const federationRuntime = vi.hoisted(() => ({
+  registerRemotes: vi.fn(),
+  loadRemote: vi.fn(),
+}));
+vi.mock('@module-federation/runtime', () => federationRuntime);
 const person = {
   employeeId: 'e',
   name: 'Employee',
@@ -18,7 +23,7 @@ const person = {
   ],
 };
 
-test('authority wins over bootstrap; targeted get fetches fresh rates only for the requested employee', async () => {
+test('hosted authority supplies identities and schedules; targeted get fetches fresh rates only for the requested employee', async () => {
   const capability: PlanningPeopleCapability = {
     listPlanningPeople: vi.fn(async () => [person]),
     getPlanningPerson: vi.fn(async (id) =>
@@ -57,10 +62,11 @@ test('failed authority never falls back to bootstrap rates, retains schedules, a
     throw new Error('remote unavailable');
   });
   const people = await failing.listPeople();
-  expect(people).toHaveLength(60);
-  expect(
-    people.every((item) => item.rates.length === 0 && item.rateDataError),
-  ).toBe(true);
+  expect(people).toEqual([]);
+  expect(await failing.getPerson('emp-001')).toBeUndefined();
+  expect(failing.getStatus?.()).toContain(
+    'Authoritative People data unavailable',
+  );
 });
 test('standalone bootstrap is explicit configuration, not a failed-authority fallback', async () => {
   const fetcher = vi
@@ -70,6 +76,70 @@ test('standalone bootstrap is explicit configuration, not a failed-authority fal
     const provider = createRuntimePlanningPeopleProvider();
     expect((await provider.listPeople())[0]?.rates.length).toBeGreaterThan(0);
     expect(provider.getStatus?.()).toContain('Standalone bootstrap');
+  } finally {
+    fetcher.mockRestore();
+  }
+});
+
+test('initial hosted failure has no fixture identities, schedules or rates and retry loads authority', async () => {
+  const load = vi
+    .fn<() => Promise<PlanningPeopleCapability>>()
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValue({
+      listPlanningPeople: async () => [
+        { ...person, name: 'Authoritative employee', weeklyHours: 20 },
+      ],
+      getPlanningPerson: async () => person,
+    });
+  const provider = createRuntimePlanningPeopleProvider(load);
+  expect(await provider.listPeople()).toEqual([]);
+  expect(provider.getStatus?.()).toContain('unavailable');
+  expect(await provider.listPeople()).toEqual([
+    { ...person, name: 'Authoritative employee', weeklyHours: 20 },
+  ]);
+  expect(provider.getStatus?.()).toBe('Authoritative People data.');
+});
+
+test('failed list refresh retains only previously authoritative identity and schedule, then recovers', async () => {
+  const snapshot = { ...person, name: 'Owner name', weeklyHours: 20 as const };
+  const list = vi
+    .fn()
+    .mockResolvedValueOnce([snapshot])
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValueOnce([person]);
+  const provider = createCapabilityPlanningPeopleProvider(async () => ({
+    listPlanningPeople: list,
+    getPlanningPerson: async () => person,
+  }));
+  expect(await provider.listPeople()).toEqual([snapshot]);
+  expect(await provider.listPeople()).toEqual([
+    {
+      ...snapshot,
+      rates: [],
+      rateDataError: expect.stringContaining('unavailable'),
+    },
+  ]);
+  expect(await provider.listPeople()).toEqual([person]);
+  expect(provider.getStatus?.()).toBe('Authoritative People data.');
+});
+
+test('configured production standalone uses the same-origin People capability without development defaults', async () => {
+  const { default: production } =
+    await import('../../../../deployment/runtime/delivery.json');
+  const fetcher = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValue(new Response(JSON.stringify(production)));
+  federationRuntime.loadRemote.mockResolvedValue({
+    listPlanningPeople: async () => [person],
+    getPlanningPerson: async () => person,
+  });
+  try {
+    expect(await createRuntimePlanningPeopleProvider().listPeople()).toEqual([
+      person,
+    ]);
+    expect(federationRuntime.registerRemotes).toHaveBeenCalledWith([
+      { name: 'people', entry: '/people/remoteEntry.js', type: 'module' },
+    ]);
   } finally {
     fetcher.mockRestore();
   }

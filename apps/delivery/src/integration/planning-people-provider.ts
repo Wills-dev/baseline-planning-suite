@@ -10,7 +10,7 @@ import type {
 } from '../application/planning-people';
 
 const unavailable =
-  'People rate data unavailable. Cost is unavailable; hour planning remains usable. Retry People data.';
+  'Authoritative People data unavailable. Cost is unavailable; previously loaded schedules may be stale. Canonical hours are retained. Retry People data.';
 
 /** Cache transport resolution, not authority: each get fetches a fresh owner snapshot. */
 export function createCapabilityPlanningPeopleProvider(
@@ -19,7 +19,6 @@ export function createCapabilityPlanningPeopleProvider(
   let capability: Promise<PlanningPeopleCapability> | undefined;
   let known: PlanningPerson[] = [];
   let status = 'Authoritative People data.';
-  const bootstrap = createFixturePlanningPeopleProvider();
   const resolve = () =>
     (capability ??= load().catch((error) => {
       capability = undefined;
@@ -35,9 +34,7 @@ export function createCapabilityPlanningPeopleProvider(
         status = 'Authoritative People data.';
       } catch {
         // Retain known schedules/identities; never fall back to bootstrap rates.
-        known = (known.length ? known : await bootstrap.listPeople()).map(
-          failed,
-        );
+        known = known.map(failed);
         status = unavailable;
       }
       return known;

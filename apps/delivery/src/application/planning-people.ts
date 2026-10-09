@@ -1,4 +1,4 @@
-import { createOfficialFixtures } from '../../../../fixtures/official-seed';
+import { createOfficialPeopleFixtures } from '../../../../fixtures/official-seed';
 import type { PlanningPersonSnapshot } from '@baseline/contracts';
 
 export interface PlanningPerson extends PlanningPersonSnapshot {
@@ -15,7 +15,7 @@ export interface PlanningPeopleProvider {
 /** Explicit standalone bootstrap mode only; never substitutes for configured authority. */
 export function createFixturePlanningPeopleProvider(): PlanningPeopleProvider {
   function people(): PlanningPerson[] {
-    const fixtures = createOfficialFixtures();
+    const fixtures = createOfficialPeopleFixtures();
     return fixtures.employees.map(({ id, name, weeklyHours }) => ({
       employeeId: id,
       name,

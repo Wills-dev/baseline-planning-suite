@@ -1,13 +1,16 @@
 import { createElement } from 'react';
 import type { ComponentType } from 'react';
 import type {
+  ShellRuntimeProps,
+  DeliveryCapacityCapability,
+  DeliveryCapacityLoader,
   PlanningPeopleCapability,
   PlanningPeopleLoader,
 } from '@baseline/contracts';
 import { loadRemote, registerRemotes } from '@module-federation/runtime';
 
 interface RemotePageModule {
-  default: ComponentType;
+  default: ComponentType<ShellRuntimeProps>;
 }
 type RemoteName = 'people' | 'delivery';
 
@@ -80,9 +83,21 @@ function assertPage<T extends { default: unknown }>(
 
 export async function loadPeoplePage(retry = false): Promise<RemotePageModule> {
   await registerConfiguredRemote('people', retry);
-  const module = await loadRemote<RemotePageModule>('people/PeoplePage');
+  const module = await loadRemote<{
+    default: ComponentType<
+      ShellRuntimeProps & { loadCapacity?: DeliveryCapacityLoader }
+    >;
+  }>('people/PeoplePage');
   assertPage(module, 'PeoplePage');
-  return module;
+  const Page = module.default;
+  return {
+    default: function HostedPeoplePage({ runtimeContext }: ShellRuntimeProps) {
+      return createElement(Page, {
+        runtimeContext,
+        loadCapacity: loadDeliveryCapacityCapability,
+      });
+    },
+  };
 }
 
 let capabilityFailed = false;
@@ -111,15 +126,36 @@ export async function loadDeliveryPage(
 ): Promise<RemotePageModule> {
   await registerConfiguredRemote('delivery', retry);
   const module = await loadRemote<{
-    default: ComponentType<{ loadPlanningPeople?: PlanningPeopleLoader }>;
+    default: ComponentType<
+      ShellRuntimeProps & { loadPlanningPeople?: PlanningPeopleLoader }
+    >;
   }>('delivery/DeliveryPage');
   assertPage(module, 'DeliveryPage');
   const Page = module.default;
   return {
-    default: function HostedDeliveryPage() {
+    default: function HostedDeliveryPage({
+      runtimeContext,
+    }: ShellRuntimeProps) {
       return createElement(Page, {
+        runtimeContext,
         loadPlanningPeople: loadPlanningPeopleCapability,
       });
     },
   };
+}
+
+let capacityFailed = false;
+export async function loadDeliveryCapacityCapability(): Promise<DeliveryCapacityCapability> {
+  try {
+    await registerConfiguredRemote('delivery', capacityFailed);
+    const capability =
+      await loadRemote<DeliveryCapacityCapability>('delivery/Capacity');
+    if (!capability || typeof capability.listCapacityStatuses !== 'function')
+      throw new Error('Delivery capacity capability unavailable');
+    capacityFailed = false;
+    return capability;
+  } catch (error) {
+    capacityFailed = true;
+    throw error;
+  }
 }

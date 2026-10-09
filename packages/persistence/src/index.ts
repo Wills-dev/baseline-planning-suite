@@ -29,6 +29,11 @@ export interface DatabaseClient<T> {
   ): Promise<T[K][]>;
   add<K extends StoreName<T>>(store: K, record: T[K]): Promise<void>;
   put<K extends StoreName<T>>(store: K, record: T[K]): Promise<void>;
+  putSequenced<K extends StoreName<T>>(
+    store: K,
+    record: T[K],
+    field: Extract<keyof T[K], string>,
+  ): Promise<void>;
   delete<K extends StoreName<T>>(store: K, id: string): Promise<void>;
   close(): Promise<void>;
 }
@@ -216,6 +221,42 @@ export function createDatabase<T extends RecordsWithIds<T>>(
       write(store, (objectStore) => objectStore.add(record)),
     put: (store, record) =>
       write(store, (objectStore) => objectStore.put(record)),
+    putSequenced: async (store, record, field) => {
+      const db = await ready();
+      const transaction = db.transaction([store, metadataStore], 'readwrite');
+      const done = transactionDone(transaction);
+      try {
+        const metadata = transaction.objectStore(metadataStore);
+        const id = `sequence:${store}:${field}`;
+        const previous: unknown = await requestResult(metadata.get(id));
+        const sequence =
+          typeof previous === 'object' &&
+          previous !== null &&
+          'value' in previous &&
+          typeof previous.value === 'number'
+            ? previous.value
+            : 0;
+        if (
+          !Number.isSafeInteger(sequence) ||
+          sequence < 0 ||
+          sequence >= Number.MAX_SAFE_INTEGER
+        )
+          throw new Error('Invalid persisted edit sequence');
+        metadata.put({ id, value: sequence + 1 });
+        transaction
+          .objectStore(store)
+          .put({ ...record, [field]: sequence + 1 });
+        await done;
+      } catch (error) {
+        try {
+          transaction.abort();
+        } catch {
+          /* Already completed/aborted. */
+        }
+        await done.catch(() => undefined);
+        throw error;
+      }
+    },
     delete: (store, id) =>
       write(store, (objectStore) => objectStore.delete(id)),
     close: async () => {

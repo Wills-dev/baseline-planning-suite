@@ -1,7 +1,11 @@
+import type { PersonCapacitySnapshot } from '@baseline/contracts';
 import type { Employee } from '@baseline/domain';
 
 interface Props {
   employees: readonly Employee[];
+  capacityStatuses: readonly PersonCapacitySnapshot[];
+  capacityMessage: string;
+  onRetryCapacity: () => void;
   query: string;
   onQueryChange: (query: string) => void;
   selectedId?: string;
@@ -11,6 +15,9 @@ interface Props {
 
 export function EmployeeRegister({
   employees,
+  capacityStatuses,
+  capacityMessage,
+  onRetryCapacity,
   query,
   onQueryChange,
   selectedId,
@@ -34,6 +41,12 @@ export function EmployeeRegister({
         {employees.length} {employees.length === 1 ? 'employee' : 'employees'}{' '}
         shown
       </p>
+      {capacityMessage && <p role="status">{capacityMessage}</p>}
+      {capacityMessage.includes('unavailable') && (
+        <button type="button" onClick={onRetryCapacity}>
+          Retry capacity status
+        </button>
+      )}
       {employees.length === 0 ? (
         <p>No employees match your search.</p>
       ) : (
@@ -67,6 +80,17 @@ export function EmployeeRegister({
                       onClick={() => onSelect(employee)}
                     >
                       {employee.name}
+                      {capacityStatuses.find(
+                        (status) => status.employeeId === employee.id,
+                      )?.oversubscribedMonths.length ? (
+                        <span
+                          className="people-error"
+                          title={`Over capacity in ${capacityStatuses.find((status) => status.employeeId === employee.id)!.oversubscribedMonths.join(', ')}`}
+                        >
+                          {' '}
+                          — Oversubscribed
+                        </span>
+                      ) : null}
                     </button>
                   </th>
                   <td>{employee.role}</td>
