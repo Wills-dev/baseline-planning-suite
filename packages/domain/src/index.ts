@@ -30,3 +30,4 @@ export {
   reconcileRoundedUnits,
   reconcileRoundedValues,
 } from './display-rounding.js';
+export { reconcileRoundedMatrixUnits } from './display-matrix.js';

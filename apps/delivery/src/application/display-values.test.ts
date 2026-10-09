@@ -273,3 +273,184 @@ test('R1 historical zero stays numeric through leaf and intermediate parent reco
   ).toMatchObject({ status: 'priced', costEUR: 0, editable: false });
   expect(() => inputToHours('0', 'Cost', future, '2026-03')).toThrow();
 });
+
+import { derivePlanningGridDisplay, displayPrecision } from './display-values';
+import type { YearMonth } from '@baseline/domain';
+const months: YearMonth[] = ['2026-03', '2026-04', '2026-05'];
+function horizonRecords(): Allocation[] {
+  return months.flatMap((month, index) =>
+    allocations(0.00371429 + index * 0.00581231).map((record) => ({
+      ...record,
+      id: `${record.id}:${month}`,
+      month,
+    })),
+  );
+}
+function gridCheck(
+  result: ReturnType<typeof derivePlanningGridDisplay>,
+  scale: number,
+) {
+  const units = (id: string, month?: YearMonth) =>
+    Math.round(
+      (month ? result.get(id)!.months.get(month)! : result.get(id)!.total!) *
+        scale,
+    );
+  for (const item of items) {
+    expect(months.reduce((sum, month) => sum + units(item.id, month), 0)).toBe(
+      units(item.id),
+    );
+    const children = items.filter((child) => child.parentId === item.id);
+    if (children.length) {
+      for (const month of months)
+        expect(
+          children.reduce((sum, child) => sum + units(child.id, month), 0),
+        ).toBe(units(item.id, month));
+      expect(children.reduce((sum, child) => sum + units(child.id), 0)).toBe(
+        units(item.id),
+      );
+    }
+  }
+}
+test.each(['Hours', 'PM', 'Percent', 'Cost'] as const)(
+  '%s horizon row/month/hierarchy totals conserve integer display units without writing hours',
+  (unit) => {
+    const records = horizonRecords();
+    const before = structuredClone(records);
+    const result = derivePlanningGridDisplay(
+      tree,
+      records,
+      person,
+      months,
+      unit,
+    );
+    gridCheck(result, 10 ** displayPrecision[unit]);
+    const exact = months.reduce(
+      (sum, month) =>
+        sum +
+        records
+          .filter((record) => record.month === month)
+          .reduce(
+            (subtotal, record) =>
+              subtotal +
+              (unit === 'Cost'
+                ? priceCellHours(record.hours, person, month).costEUR!
+                : hoursToDisplay(record.hours, unit, person, month)),
+            0,
+          ),
+      0,
+    );
+    expect(result.get('root')!.total).toBe(
+      reconcileRoundedUnits([exact], displayPrecision[unit])[0]! /
+        10 ** displayPrecision[unit],
+    );
+    expect(result).toEqual(
+      derivePlanningGridDisplay(tree, records, person, months, unit),
+    );
+    expect(records).toEqual(before);
+  },
+);
+import { hoursToDisplay } from './allocation-values';
+import { reconcileRoundedUnits } from '@baseline/domain';
+
+test('row total rounds exact monthly amounts once rather than independently rounded cells', () => {
+  const leaf = buildWbsTree([items.find((item) => item.id === 'root')!]);
+  const records = months.slice(0, 2).map((month) => ({
+    ...allocations(0)[0]!,
+    month,
+    breakdownItemId: 'root',
+    hours: 0.004,
+  }));
+  const row = derivePlanningGridDisplay(
+    leaf,
+    records,
+    person,
+    months.slice(0, 2),
+    'Hours',
+  ).get('root')!;
+  expect(row.total).toBe(0.01);
+  expect([...row.months.values()]).toEqual([0.01, 0]);
+});
+test('PM and percent row totals use each month capacity rather than a constant denominator', () => {
+  const records = months.map((month) => ({
+    ...allocations(0)[0]!,
+    month,
+    breakdownItemId: 'root',
+    hours: 88,
+  }));
+  const leaf = buildWbsTree([items.find((item) => item.id === 'root')!]);
+  for (const unit of ['PM', 'Percent'] as const) {
+    const row = derivePlanningGridDisplay(
+      leaf,
+      records,
+      person,
+      months,
+      unit,
+    ).get('root')!;
+    const exact = months.reduce(
+      (sum, month) => sum + hoursToDisplay(88, unit, person, month),
+      0,
+    );
+    expect(row.total).toBe(
+      reconcileRoundedUnits([exact], displayPrecision[unit])[0]! /
+        10 ** displayPrecision[unit],
+    );
+    expect(exact).not.toBe(unit === 'PM' ? 1.5 : 150);
+  }
+});
+test('R1 zero months contribute zero; failed/partial Cost leaves TOTAL unavailable with known months visible', () => {
+  const records = horizonRecords();
+  const future = {
+    ...person,
+    rates: [{ ...person.rates[0]!, validFrom: '2026-04-01' as const }],
+  };
+  const values = derivePlanningGridDisplay(
+    tree,
+    records,
+    future,
+    months,
+    'Cost',
+  );
+  gridCheck(values, 100);
+  expect(
+    [...values.values()].every((row) => row.months.get('2026-03') === 0),
+  ).toBe(true);
+  const partial = derivePlanningGridDisplay(
+    tree,
+    records,
+    {
+      ...future,
+      rates: [{ ...future.rates[0]!, validFrom: '2026-04-15' as const }],
+    },
+    months,
+    'Cost',
+  );
+  expect(partial.get('root')!.total).toBeNull();
+  expect(partial.get('root')!.months.get('2026-04')).toBeNull();
+  expect(partial.get('root')!.months.get('2026-03')).toBe(0);
+  expect(partial.get('root')!.months.get('2026-05')).not.toBeNull();
+  const failed = derivePlanningGridDisplay(
+    tree,
+    records,
+    { ...future, rateDataError: 'offline' },
+    months,
+    'Cost',
+  );
+  expect(
+    [...failed.values()].every(
+      (row) =>
+        row.total === null &&
+        [...row.months.values()].every((value) => value === null),
+    ),
+  ).toBe(true);
+  const zero = derivePlanningGridDisplay(
+    tree,
+    records,
+    {
+      ...person,
+      rates: person.rates.map((rate) => ({ ...rate, hourlyCostEUR: 0 })),
+    },
+    months,
+    'Cost',
+  );
+  expect([...zero.values()].every((row) => row.total === 0)).toBe(true);
+});

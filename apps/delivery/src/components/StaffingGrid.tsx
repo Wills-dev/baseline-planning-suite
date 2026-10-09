@@ -5,7 +5,11 @@ import type { Allocation, BreakdownItem, YearMonth } from '@baseline/domain';
 import type { PlanningPerson } from '../application/planning-people';
 import type { EditableUnit } from '../application/allocation-values';
 import { priceCellHours } from '../application/allocation-values';
-import { derivePlanningDisplay } from '../application/display-values';
+import {
+  derivePlanningGridDisplay,
+  formatDisplayValue,
+  type PlanningDisplayRow,
+} from '../application/display-values';
 import {
   buildWbsTree,
   isLeaf,
@@ -62,21 +66,17 @@ export function StaffingGrid({
   const path = workItemPath(selectedId, items);
   const displays = useMemo(() => {
     const tree = buildWbsTree(items);
-    const result = new Map<string, number | null>();
+    const result = new Map<string, PlanningDisplayRow>();
     for (const person of people) {
-      for (const month of planningMonths) {
-        const values = derivePlanningDisplay(
-          tree,
-          allocations,
-          person,
-          month,
-          unit,
-        );
-        result.set(
-          capacityKey(person.employeeId, month),
-          values.get(selectedId) ?? null,
-        );
-      }
+      const values = derivePlanningGridDisplay(
+        tree,
+        allocations,
+        person,
+        planningMonths,
+        unit,
+      );
+      const row = values.get(selectedId);
+      if (row) result.set(person.employeeId, row);
     }
     return result;
   }, [selectedId, items, allocations, people, planningMonths, unit]);
@@ -131,11 +131,17 @@ export function StaffingGrid({
                     {monthNames[Number(month.slice(5)) - 1]} {month.slice(0, 4)}
                   </th>
                 ))}
+                <th scope="col" className="delivery-row-total">
+                  TOTAL
+                </th>
               </tr>
             </thead>
             <tbody>
               {people.map((person) => (
-                <tr key={person.employeeId}>
+                <tr
+                  key={person.employeeId}
+                  className={leaf ? undefined : 'delivery-derived-row'}
+                >
                   <th scope="row">
                     {person.name}
                     <span className="delivery-person-hours">
@@ -148,7 +154,9 @@ export function StaffingGrid({
                       unit === 'Cost'
                         ? priceCellHours(0, person, month)
                         : undefined;
-                    const display = displays.get(key);
+                    const display = displays
+                      .get(person.employeeId)
+                      ?.months.get(month);
                     const unavailable =
                       priced?.costEUR === null || display === null;
                     const value = display ?? 0;
@@ -202,6 +210,18 @@ export function StaffingGrid({
                       </td>
                     );
                   })}
+                  <td className="delivery-row-total">
+                    <output
+                      aria-label={`${person.name}, TOTAL, ${path}, ${unit}`}
+                    >
+                      {displays.get(person.employeeId)?.total == null
+                        ? 'Cost unavailable'
+                        : formatDisplayValue(
+                            displays.get(person.employeeId)!.total!,
+                            unit,
+                          )}
+                    </output>
+                  </td>
                 </tr>
               ))}
             </tbody>
