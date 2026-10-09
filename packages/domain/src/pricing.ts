@@ -14,6 +14,8 @@ export interface DailyAllocationPrice {
 }
 
 export interface AllocationPricingResult {
+  /** Calendar month before the first employee rate is a marked zero-cost month. */
+  rateStatus: 'priced' | 'before-first-rate' | 'missing-rate';
   totalCostEUR: number;
   hoursPerWorkingDay: number;
   missingRateDays: DateOnly[];
@@ -39,7 +41,18 @@ export function priceAllocation(
       costEUR: rate ? hoursPerWorkingDay * rate.hourlyCostEUR : 0,
     };
   });
+  const firstRate = rates
+    .filter((rate) => rate.employeeId === allocation.employeeId)
+    .map((rate) => rate.validFrom)
+    .sort()[0];
+  const rateStatus =
+    firstRate && allocation.month < firstRate.slice(0, 7)
+      ? 'before-first-rate'
+      : missingRateDays.length
+        ? 'missing-rate'
+        : 'priced';
   return {
+    rateStatus,
     totalCostEUR: dailyPrices.reduce((total, day) => total + day.costEUR, 0),
     hoursPerWorkingDay,
     missingRateDays,

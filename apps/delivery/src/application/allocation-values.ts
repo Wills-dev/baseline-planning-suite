@@ -83,12 +83,12 @@ export function allocationIdentity(
   return JSON.stringify([projectId, breakdownItemId, employeeId, month]);
 }
 
-export interface CellPrice {
-  costEUR: number | null;
-  unavailable: string;
-  editable: boolean;
-}
-/** Complete working-day coverage is required; partial pricing is never shown as a full cost. */
+export type CellPrice = { unavailable: string } & (
+  | { status: 'priced'; costEUR: number; editable: boolean }
+  | { status: 'before-first-rate'; costEUR: 0; editable: false }
+  | { status: 'unavailable'; costEUR: null; editable: false }
+);
+/** R1 historical months are marked zero; authority failures and partial coverage stay unavailable. */
 export function priceCellHours(
   hours: number,
   person: PlanningPerson,
@@ -96,6 +96,7 @@ export function priceCellHours(
 ): CellPrice {
   if (person.rateDataError)
     return {
+      status: 'unavailable',
       costEUR: null,
       unavailable: person.rateDataError,
       editable: false,
@@ -113,14 +114,25 @@ export function priceCellHours(
       { ...allocation, hours: 1 },
       person.rates,
     );
+    const priced = priceAllocation(allocation, person.rates);
+    if (unitPrice.rateStatus === 'before-first-rate')
+      return {
+        status: 'before-first-rate',
+        costEUR: 0,
+        unavailable:
+          'Cost editing unavailable before the first rate. Use Hours, PM or % capacity.',
+        editable: false,
+      };
     if (unitPrice.missingRateDays.length)
       return {
+        status: 'unavailable',
         costEUR: null,
         unavailable: 'Cost unavailable: no applicable rate.',
         editable: false,
       };
     return {
-      costEUR: priceAllocation(allocation, person.rates).totalCostEUR,
+      status: 'priced',
+      costEUR: priced.totalCostEUR,
       unavailable:
         unitPrice.totalCostEUR === 0
           ? 'Cost editing unavailable: monthly rate is zero. Use Hours, PM or % capacity.'
@@ -129,6 +141,7 @@ export function priceCellHours(
     };
   } catch {
     return {
+      status: 'unavailable',
       costEUR: null,
       unavailable: 'Cost unavailable: invalid rate data.',
       editable: false,

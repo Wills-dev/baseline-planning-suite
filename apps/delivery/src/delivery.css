@@ -187,3 +187,13 @@
 .delivery-capacity-description {
   color: #684800;
 }
+
+.delivery-before-first-rate {
+  display: block;
+  margin-top: 0.3rem;
+  max-width: 12rem;
+  font-size: 0.75rem;
+  color: #374151;
+  border-left: 2px solid #9ca3af;
+  padding-left: 0.3rem;
+}

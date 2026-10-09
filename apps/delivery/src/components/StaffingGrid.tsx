@@ -6,7 +6,12 @@ import type { PlanningPerson } from '../application/planning-people';
 import type { EditableUnit } from '../application/allocation-values';
 import { priceCellHours } from '../application/allocation-values';
 import { derivePlanningDisplay } from '../application/display-values';
-import { buildWbsTree, isLeaf, workItemPath } from '../application/wbs';
+import {
+  buildWbsTree,
+  isLeaf,
+  workItemPath,
+  rollupHours,
+} from '../application/wbs';
 import { AllocationCell } from './AllocationCell';
 
 const monthNames = [
@@ -140,6 +145,18 @@ export function StaffingGrid({
                             month,
                           ])}
                           value={value}
+                          beforeFirstRate={
+                            priced?.status === 'before-first-rate' &&
+                            rollupHours(
+                              selectedId,
+                              items,
+                              allocations.filter(
+                                (allocation) =>
+                                  allocation.employeeId === person.employeeId &&
+                                  allocation.month === month,
+                              ),
+                            ) > 0
+                          }
                           capacityStatus={status}
                           latestEdit={latestEdit}
                           unit={unit}

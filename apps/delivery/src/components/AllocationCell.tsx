@@ -12,6 +12,7 @@ interface Props {
   latestEdit?: boolean;
   unit?: AllocationUnit;
   unavailable?: string | undefined;
+  beforeFirstRate?: boolean;
   editUnavailable?: string | undefined;
   label: string;
   disabled: boolean;
@@ -26,13 +27,22 @@ export function AllocationCell({
   unit = 'Hours',
   unavailable,
   editUnavailable,
+  beforeFirstRate = false,
   label,
   disabled,
   readOnly,
   onSave,
 }: Props) {
   const warningId = useId();
+  const historicalRateId = useId();
   const overCapacity = capacityStatus?.overAllocated;
+  const descriptions =
+    [
+      overCapacity ? warningId : undefined,
+      beforeFirstRate && !unavailable ? historicalRateId : undefined,
+    ]
+      .filter(Boolean)
+      .join(' ') || undefined;
   // null means clean: display the current authoritative application value.
   const [draft, setDraft] = useState<string | null>(null);
   const pending = useRef(false);
@@ -66,10 +76,7 @@ export function AllocationCell({
       {unavailable ? (
         <span aria-label={`${label}: ${unavailable}`}>{unavailable}</span>
       ) : readOnly || editUnavailable ? (
-        <output
-          aria-label={label}
-          aria-describedby={overCapacity ? warningId : undefined}
-        >
+        <output aria-label={label} aria-describedby={descriptions}>
           {formatDisplayValue(value, unit)}
         </output>
       ) : (
@@ -80,7 +87,7 @@ export function AllocationCell({
           value={draft ?? formatInputValue(value, unit)}
           disabled={disabled}
           aria-label={label}
-          aria-describedby={`delivery-grid-help${overCapacity ? ` ${warningId}` : ''}`}
+          aria-describedby={`delivery-grid-help${descriptions ? ` ${descriptions}` : ''}`}
           onChange={(event) => setDraft(event.target.value)}
           onBlur={() => void commit()}
           onKeyDown={(event) => {
@@ -91,6 +98,15 @@ export function AllocationCell({
             if (event.key === 'Escape') setDraft(null);
           }}
         />
+      )}
+      {beforeFirstRate && !unavailable && (
+        <span
+          id={historicalRateId}
+          className="delivery-before-first-rate"
+          title="This allocation month is earlier than the employee's first rate record."
+        >
+          €0: month before first rate.
+        </span>
       )}
       {editUnavailable && !unavailable && <span>{editUnavailable}</span>}
       {unit === 'Cost' && !readOnly && !unavailable && !editUnavailable && (

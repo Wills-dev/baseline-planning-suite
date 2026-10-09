@@ -53,6 +53,7 @@ describe('monthly allocation pricing', () => {
     expect(newDays).toHaveLength(14);
     expect(oldDays.reduce((sum, day) => sum + day.costEUR, 0)).toBe(2560);
     expect(newDays.reduce((sum, day) => sum + day.costEUR, 0)).toBe(5320);
+    expect(result.rateStatus).toBe('priced');
     expect(result.totalCostEUR).toBe(7880);
     expect(result.missingRateDays).toEqual([]);
     expect(blendedHourlyRate(result.totalCostEUR, hours)).toBeCloseTo(
@@ -66,6 +67,7 @@ describe('monthly allocation pricing', () => {
   test('prices a month before the first rate at zero and exposes every missing day', () => {
     const result = priceAllocation({ ...allocation, month: '2024-12' }, rates);
     expect(result.totalCostEUR).toBe(0);
+    expect(result.rateStatus).toBe('before-first-rate');
     expect(result.missingRateDays).toEqual(getWorkingDays('2024-12'));
     expect(
       result.dailyPrices.every(
@@ -82,6 +84,7 @@ describe('monthly allocation pricing', () => {
     expect(result.missingRateDays).toEqual(
       getWorkingDays('2026-03').filter((day) => day < '2026-03-12'),
     );
+    expect(result.rateStatus).toBe('missing-rate');
     expect(result.missingRateDays).toHaveLength(8);
     expect(result.totalCostEUR).toBe(5320);
     expect(
@@ -100,6 +103,7 @@ describe('monthly allocation pricing', () => {
     ]);
     expect(result.totalCostEUR).toBe(0);
     expect(result.missingRateDays).toEqual([]);
+    expect(result.rateStatus).toBe('priced');
     expect(result.dailyPrices.every((day) => day.hourlyCostEUR === 0)).toBe(
       true,
     );
@@ -216,4 +220,22 @@ test('single-rate inverse and unavailable/zero-rate inverse behavior are explici
   ).toThrow('monthly rate is zero');
   for (const cost of [-1, NaN, Infinity])
     expect(() => costToHours(cost, 'okafor', '2026-03', rates)).toThrow();
+});
+
+test('historical zero requires an employee rate in a later calendar month', () => {
+  expect(priceAllocation(allocation, []).rateStatus).toBe('missing-rate');
+  expect(
+    priceAllocation(allocation, [
+      { ...rates[0]!, employeeId: 'other', validFrom: '2026-04-01' },
+    ]).rateStatus,
+  ).toBe('missing-rate');
+  expect(
+    priceAllocation(allocation, [{ ...rates[0]!, validFrom: '2026-04-01' }])
+      .rateStatus,
+  ).toBe('before-first-rate');
+  const sameMonth = priceAllocation({ ...allocation, month: '2026-05' }, [
+    { ...rates[0]!, validFrom: '2026-05-31' },
+  ]);
+  expect(sameMonth.totalCostEUR).toBe(0);
+  expect(sameMonth.rateStatus).toBe('missing-rate');
 });

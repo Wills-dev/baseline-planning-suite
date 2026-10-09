@@ -5,13 +5,14 @@ import type {
   BreakdownItem,
 } from '@baseline/domain';
 import {
+  reconcileWbsDisplay,
   derivePlanningDisplay,
   deriveWbsHoursDisplay,
   formatDisplayValue,
   formatInputValue,
 } from './display-values';
 import { buildWbsTree } from './wbs';
-import { inputToHours } from './allocation-values';
+import { priceCellHours, inputToHours } from './allocation-values';
 
 const items: BreakdownItem[] = [
   { id: 'root', projectId: 'p', name: 'Root', type: 'Deliverable' },
@@ -209,4 +210,66 @@ test('unavailable subtrees do not fabricate parent Cost or suppress available si
   expect(
     Math.round(values.get('b1')! * 100) + Math.round(values.get('b2')! * 100),
   ).toBe(2001);
+});
+
+test('R1 historical zero stays numeric through leaf and intermediate parent reconciliation', () => {
+  const future = {
+    ...person,
+    rates: [{ ...person.rates[0]!, validFrom: '2026-04-01' as const }],
+  };
+  const records = allocations(22);
+  const before = JSON.stringify(records);
+  expect(priceCellHours(22, future, '2026-03')).toMatchObject({
+    status: 'before-first-rate',
+    costEUR: 0,
+    editable: false,
+  });
+  const values = derivePlanningDisplay(
+    tree,
+    records,
+    future,
+    '2026-03',
+    'Cost',
+  );
+  expect([...values.values()].every((value) => value === 0)).toBe(true);
+  const mixed = reconcileWbsDisplay(
+    tree,
+    new Map([
+      ['a1', 0],
+      ['a2', 12.34],
+      ['b1', 56.78],
+      ['b2', 0],
+    ]),
+    2,
+  );
+  expect(mixed.get('a')).toBe(12.34);
+  expect(mixed.get('root')).toBe(69.12);
+  expect(JSON.stringify(records)).toBe(before);
+  const failed = { ...future, rateDataError: 'People authority unavailable' };
+  expect(priceCellHours(22, failed, '2026-03')).toMatchObject({
+    status: 'unavailable',
+    costEUR: null,
+  });
+  expect(
+    [
+      ...derivePlanningDisplay(
+        tree,
+        records,
+        failed,
+        '2026-03',
+        'Cost',
+      ).values(),
+    ].every((value) => value === null),
+  ).toBe(true);
+  expect(
+    priceCellHours(
+      22,
+      {
+        ...person,
+        rates: person.rates.map((rate) => ({ ...rate, hourlyCostEUR: 0 })),
+      },
+      '2026-03',
+    ),
+  ).toMatchObject({ status: 'priced', costEUR: 0, editable: false });
+  expect(() => inputToHours('0', 'Cost', future, '2026-03')).toThrow();
 });

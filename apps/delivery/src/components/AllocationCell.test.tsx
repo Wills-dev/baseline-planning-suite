@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { AllocationCell } from './AllocationCell';
 import { StaffingGrid } from './StaffingGrid';
+import type { RateRecord } from '@baseline/domain';
 import type { EditableUnit } from '../application/allocation-values';
 
 let container: HTMLDivElement;
@@ -206,14 +207,20 @@ test('parent Cost sums individually priced descendants and stays read-only; miss
     },
   ];
   const onSave = vi.fn(async () => true);
-  async function grid(rates = person.rates) {
+  async function grid(
+    rates: RateRecord[] = person.rates,
+    selectedId = 'parent',
+    rateDataError?: string,
+  ) {
     await act(async () =>
       root.render(
         createElement(StaffingGrid, {
-          selectedId: 'parent',
+          selectedId,
           items,
           allocations,
-          people: [{ ...person, rates }],
+          people: [
+            { ...person, rates, ...(rateDataError ? { rateDataError } : {}) },
+          ],
           planningMonths: ['2026-03'],
           unit: 'Cost',
           disabled: false,
@@ -233,6 +240,33 @@ test('parent Cost sums individually priced descendants and stays read-only; miss
     'Cost unavailable: no applicable rate.',
   );
   expect(container.textContent).not.toContain('€0');
+  const future: RateRecord[] = [
+    { ...person.rates[0]!, validFrom: '2026-04-01' },
+  ];
+  for (const selectedId of ['a', 'parent']) {
+    await grid(future, selectedId);
+    const output = container.querySelector('output')!;
+    expect(output.textContent).toBe('€0.00');
+    const mark = container.querySelector('.delivery-before-first-rate')!;
+    expect(mark.textContent).toContain('month before first rate');
+    expect(mark.getAttribute('title')).toContain(
+      "employee's first rate record",
+    );
+    expect(output.getAttribute('aria-describedby')?.split(' ')).toContain(
+      mark.id,
+    );
+  }
+  await grid(
+    person.rates.map((rate) => ({ ...rate, hourlyCostEUR: 0 })),
+    'a',
+  );
+  expect(container.querySelector('output')?.textContent).toBe('€0.00');
+  expect(container.querySelector('.delivery-before-first-rate')).toBeNull();
+  await grid(future, 'parent', 'People authority unavailable');
+  expect(container.textContent).toContain('People authority unavailable');
+  expect(container.querySelector('.delivery-before-first-rate')).toBeNull();
+  expect(container.querySelector('output')).toBeNull();
+  expect(onSave).not.toHaveBeenCalled();
 });
 
 test('global capacity warnings remain accessible on editable and read-only cells', async () => {
