@@ -4,6 +4,11 @@ import {
   createCapabilityPlanningPeopleProvider,
   createRuntimePlanningPeopleProvider,
 } from './planning-people-provider';
+const federationRuntime = vi.hoisted(() => ({
+  registerRemotes: vi.fn(),
+  loadRemote: vi.fn(),
+}));
+vi.mock('@module-federation/runtime', () => federationRuntime);
 const person = {
   employeeId: 'e',
   name: 'Employee',
@@ -116,4 +121,26 @@ test('failed list refresh retains only previously authoritative identity and sch
   ]);
   expect(await provider.listPeople()).toEqual([person]);
   expect(provider.getStatus?.()).toBe('Authoritative People data.');
+});
+
+test('configured production standalone uses the same-origin People capability without development defaults', async () => {
+  const { default: production } =
+    await import('../../../../deployment/runtime/delivery.json');
+  const fetcher = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValue(new Response(JSON.stringify(production)));
+  federationRuntime.loadRemote.mockResolvedValue({
+    listPlanningPeople: async () => [person],
+    getPlanningPerson: async () => person,
+  });
+  try {
+    expect(await createRuntimePlanningPeopleProvider().listPeople()).toEqual([
+      person,
+    ]);
+    expect(federationRuntime.registerRemotes).toHaveBeenCalledWith([
+      { name: 'people', entry: '/people/remoteEntry.js', type: 'module' },
+    ]);
+  } finally {
+    fetcher.mockRestore();
+  }
 });

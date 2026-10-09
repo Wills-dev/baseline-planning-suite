@@ -236,3 +236,39 @@ test('People page loads without Delivery and its injected capacity capability fa
   await expect(element.props.loadCapacity()).resolves.toBe(capability);
   expect(runtime.loadRemote).toHaveBeenLastCalledWith('delivery/Capacity');
 });
+
+test('production runtime configuration uses same-origin entries for pages and never development defaults', async () => {
+  const { default: production } =
+    await import('../../../deployment/runtime/shell.json');
+  vi.mocked(fetch).mockResolvedValue(config(production));
+  await loaders.loadPeoplePage();
+  await loaders.loadDeliveryPage();
+  expect(
+    runtime.registerRemotes.mock.calls.map(([entries]) => entries[0].entry),
+  ).toEqual([
+    new URL('/people/remoteEntry.js', location.href).href,
+    new URL('/delivery/remoteEntry.js', location.href).href,
+  ]);
+  expect(fetch).toHaveBeenCalledWith('/remote-config.json', {
+    cache: 'no-store',
+  });
+});
+
+test('unavailable production runtime configuration rejects rather than selecting development ports', async () => {
+  vi.mocked(fetch).mockResolvedValue(new Response('offline', { status: 503 }));
+  await expect(loaders.loadPeoplePage()).rejects.toThrow(
+    'Could not load remote configuration',
+  );
+  expect(runtime.registerRemotes).not.toHaveBeenCalled();
+  expect(runtime.loadRemote).not.toHaveBeenCalled();
+});
+
+test('development runtime configuration still registers development entries', async () => {
+  const { default: development } = await import('../public/remote-config.json');
+  vi.mocked(fetch).mockResolvedValue(config(development));
+  await loaders.loadPeoplePage();
+  expect(runtime.registerRemotes).toHaveBeenCalledWith(
+    [{ name: 'people', entry: development.people, type: 'module' }],
+    { force: false },
+  );
+});

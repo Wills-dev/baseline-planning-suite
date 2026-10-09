@@ -43,7 +43,11 @@ Runtime JSON uses `Cache-Control: no-store`; entries and HTML revalidate, and ha
 
 Application data lives in **browser IndexedDB**, not Docker volumes. `docker compose down` or a container restart does not reset it. The shared origin allows hosted and standalone pages to see the same owner databases, `baseline-planning-people` and `baseline-planning-delivery`; URL paths do not partition IndexedDB. `localhost:8080` is a different origin from development ports, so existing development-port data is not automatically carried over. Rate invalidation remains document-scoped; separate tabs do not exchange `people.rateChanged` events.
 
-**Verification:** Compose configuration was validated, and production artifacts were verified using native Nginx, including hosted/standalone pages, remote assets, rate-driven Cost updates, and remote failure recovery. Actual Docker engine image build, container startup, and restart were **not executed because Docker was unavailable**. Clean-clone `docker compose up --build` verification remains pending.
+**Verification:**
+
+- **Automated checks:** The repository test suite, typecheck, lint, production build, formatting check, and `git diff --check` passed separately from deployment verification. Reproduce these using the commands under Quality Checks.
+- **Docker/HTTP checks:** A fresh clone of commit `bf43bcf` built successfully without Docker build cache, host Node.js, or existing `node_modules`. Nginx returned HTTP 200 for Shell, standalone People/Delivery, runtime configuration files, and both `/people/remoteEntry.js` and `/delivery/remoteEntry.js` with JavaScript content types. A deliberately missing People entry returned a real 404 rather than Shell SPA HTML. This HTTP-only verification temporarily used port **18080** to avoid another local container; the normal production URL remains **http://localhost:8080**. The temporary container, image, and clone were removed afterward. No browser interaction was included in this clean-clone check.
+- **Browser checks:** Separate verification on the normal Docker deployment at **http://localhost:8080** confirmed Shell, hosted and standalone People/Delivery, PlanningRates and Capacity capabilities, Shell active-user/display-currency propagation, and remote failure isolation/retry.
 
 ## Repository Structure
 
