@@ -1,3 +1,4 @@
+import { loadStandaloneCapacity } from './integration/delivery-capacity';
 import type { ShellRuntimeContext } from '@baseline/contracts';
 import PeoplePage from './PeoplePage';
 
@@ -8,5 +9,10 @@ const standaloneContext: ShellRuntimeContext = {
 };
 
 export function App() {
-  return <PeoplePage runtimeContext={standaloneContext} />;
+  return (
+    <PeoplePage
+      runtimeContext={standaloneContext}
+      loadCapacity={loadStandaloneCapacity}
+    />
+  );
 }

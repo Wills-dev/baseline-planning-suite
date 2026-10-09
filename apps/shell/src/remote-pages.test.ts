@@ -211,3 +211,28 @@ test('federated page loaders forward runtime context without losing the Delivery
     loaders.loadPlanningPeopleCapability,
   );
 });
+
+test('People page loads without Delivery and its injected capacity capability fails independently then retries', async () => {
+  const hosted = await loaders.loadPeoplePage();
+  expect(runtime.loadRemote).toHaveBeenCalledExactlyOnceWith(
+    'people/PeoplePage',
+  );
+  const element = (
+    hosted.default as (
+      props: ShellRuntimeProps,
+    ) => React.ReactElement<{ loadCapacity: () => Promise<unknown> }>
+  )({
+    runtimeContext: {
+      displayCurrency: 'EUR',
+      activeUser: { id: 'e', name: 'User' },
+    },
+  });
+  runtime.loadRemote.mockRejectedValueOnce(new Error('capacity offline'));
+  await expect(element.props.loadCapacity()).rejects.toThrow(
+    'capacity offline',
+  );
+  const capability = { listCapacityStatuses: vi.fn() };
+  runtime.loadRemote.mockResolvedValueOnce(capability);
+  await expect(element.props.loadCapacity()).resolves.toBe(capability);
+  expect(runtime.loadRemote).toHaveBeenLastCalledWith('delivery/Capacity');
+});

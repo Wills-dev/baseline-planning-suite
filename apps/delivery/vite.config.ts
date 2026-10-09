@@ -9,7 +9,10 @@ export default defineConfig({
     federation({
       name: 'delivery',
       filename: 'remoteEntry.js',
-      exposes: { './DeliveryPage': './src/federated-page.ts' },
+      exposes: {
+        './DeliveryPage': './src/federated-page.ts',
+        './Capacity': './src/public/capacity.ts',
+      },
       shared: {
         react: { singleton: true },
         'react-dom': { singleton: true },

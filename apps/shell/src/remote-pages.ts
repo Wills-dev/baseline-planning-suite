@@ -2,6 +2,8 @@ import { createElement } from 'react';
 import type { ComponentType } from 'react';
 import type {
   ShellRuntimeProps,
+  DeliveryCapacityCapability,
+  DeliveryCapacityLoader,
   PlanningPeopleCapability,
   PlanningPeopleLoader,
 } from '@baseline/contracts';
@@ -81,9 +83,21 @@ function assertPage<T extends { default: unknown }>(
 
 export async function loadPeoplePage(retry = false): Promise<RemotePageModule> {
   await registerConfiguredRemote('people', retry);
-  const module = await loadRemote<RemotePageModule>('people/PeoplePage');
+  const module = await loadRemote<{
+    default: ComponentType<
+      ShellRuntimeProps & { loadCapacity?: DeliveryCapacityLoader }
+    >;
+  }>('people/PeoplePage');
   assertPage(module, 'PeoplePage');
-  return module;
+  const Page = module.default;
+  return {
+    default: function HostedPeoplePage({ runtimeContext }: ShellRuntimeProps) {
+      return createElement(Page, {
+        runtimeContext,
+        loadCapacity: loadDeliveryCapacityCapability,
+      });
+    },
+  };
 }
 
 let capabilityFailed = false;
@@ -128,4 +142,20 @@ export async function loadDeliveryPage(
       });
     },
   };
+}
+
+let capacityFailed = false;
+export async function loadDeliveryCapacityCapability(): Promise<DeliveryCapacityCapability> {
+  try {
+    await registerConfiguredRemote('delivery', capacityFailed);
+    const capability =
+      await loadRemote<DeliveryCapacityCapability>('delivery/Capacity');
+    if (!capability || typeof capability.listCapacityStatuses !== 'function')
+      throw new Error('Delivery capacity capability unavailable');
+    capacityFailed = false;
+    return capability;
+  } catch (error) {
+    capacityFailed = true;
+    throw error;
+  }
 }

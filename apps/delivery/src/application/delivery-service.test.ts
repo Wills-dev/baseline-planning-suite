@@ -38,7 +38,12 @@ function memoryRepository(): DeliveryRepository {
         (allocation) => allocation.projectId === projectId,
       ),
     saveAllocation: async (allocation) => {
-      allocations.set(allocation.id, allocation);
+      const editSequence =
+        Math.max(
+          0,
+          ...[...allocations.values()].map((item) => item.editSequence ?? 0),
+        ) + 1;
+      allocations.set(allocation.id, { ...allocation, editSequence });
     },
     deleteAllocation: async (id) => {
       allocations.delete(id);
@@ -410,6 +415,7 @@ test('official March integration and Cost input use the same effective-dated mod
   expect(stored.hours).toBeCloseTo(hours, 12);
   expect(Object.keys(stored).sort()).toEqual([
     'breakdownItemId',
+    'editSequence',
     'employeeId',
     'hours',
     'id',
@@ -532,7 +538,7 @@ test('refresh failure clears stale prices; older targeted responses cannot repla
   expect(service.currentPeople()[0]?.rates[0]?.hourlyCostEUR).toBe(200);
 });
 
-test('save over capacity warns and subsequent reduction/deletion clears derived session ownership', async () => {
+test('save over capacity warns and subsequent reduction/deletion clears resolved attribution', async () => {
   const { service } = setup();
   const key = capacityKey('emp-003', '2026-06');
   let data = await service.saveCell(
@@ -544,7 +550,7 @@ test('save over capacity warns and subsequent reduction/deletion clears derived 
     'Hours',
   );
   expect(data.capacityStatuses.get(key)?.overAllocated).toBe(true);
-  expect(data.latestCapacityEdits.get(key)).toEqual({
+  expect(data.latestCapacityEdits.get(key)).toMatchObject({
     projectId,
     breakdownItemId: leafId,
   });
@@ -597,4 +603,42 @@ test('a rate invalidation during slow initialization is retained in the returned
   await service.refreshPerson(person.employeeId);
   finish?.(projects);
   expect((await initializing).people[0]?.rates[0]?.hourlyCostEUR).toBe(110);
+});
+
+test('latest contributing assignment survives service reload and uses the other project name; deletion falls back', async () => {
+  const { repository, service } = setup();
+  const key = capacityKey('emp-003', '2026-06');
+  await service.saveCell(
+    'prj-1',
+    'wbs-012',
+    'emp-003',
+    '2026-06',
+    '200',
+    'Hours',
+  );
+  await service.saveCell(
+    'prj-3',
+    'wbs-061',
+    'emp-003',
+    '2026-06',
+    '300',
+    'Hours',
+  );
+  const reloaded = createDeliveryService(repository, provider);
+  const data = await reloaded.loadProject('prj-1');
+  expect(data.capacityStatuses.get(key)?.overAllocated).toBe(true);
+  expect(data.latestCapacityEdits.get(key)).toMatchObject({
+    projectId: 'prj-3',
+    breakdownItemId: 'wbs-061',
+    assignmentName: 'Client Portal Rebuild / Implementation',
+  });
+  const deleted = await reloaded.saveCell(
+    'prj-3',
+    'wbs-061',
+    'emp-003',
+    '2026-06',
+    '0',
+    'Hours',
+  );
+  expect(deleted.latestCapacityEdits.get(key)?.projectId).toBe('prj-1');
 });

@@ -14,3 +14,15 @@ export type {
   ShellRuntimeContext,
   ShellRuntimeProps,
 } from './shell-runtime.js';
+
+export type {
+  CapacityPerson,
+  PersonCapacitySnapshot,
+  DeliveryCapacityCapability,
+  DeliveryCapacityLoader,
+} from './delivery-capacity.js';
+export {
+  publishDeliveryAllocationsChanged,
+  subscribeDeliveryAllocationsChanged,
+} from './delivery-events.js';
+export type { DeliveryAllocationsChangedEvent } from './delivery-events.js';

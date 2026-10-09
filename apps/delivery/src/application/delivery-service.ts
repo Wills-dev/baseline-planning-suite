@@ -1,4 +1,6 @@
-import { calculateCapacityStatuses, capacityKey } from '@baseline/domain';
+import { calculatePlanCapacity } from './capacity-capability';
+import { publishDeliveryAllocationsChanged } from '@baseline/contracts';
+import { capacityKey } from '@baseline/domain';
 import type {
   Allocation,
   CapacityStatus,
@@ -24,7 +26,7 @@ export interface ProjectPlanningData {
   capacityStatuses: ReadonlyMap<string, CapacityStatus>;
   latestCapacityEdits: ReadonlyMap<
     string,
-    { projectId: string; breakdownItemId: string }
+    { projectId: string; breakdownItemId: string; assignmentName?: string }
   >;
 }
 
@@ -41,10 +43,6 @@ export function createDeliveryService(
   configuration: PlanningConfiguration = bootstrapPlanningConfiguration,
 ) {
   const { planningMonths } = configuration;
-  const latestCapacityEdits = new Map<
-    string,
-    { projectId: string; breakdownItemId: string }
-  >();
   let people: PlanningPerson[] | undefined;
   let capacityAllocations: readonly Allocation[] = [];
   function currentPeople(): PlanningPerson[] {
@@ -114,14 +112,50 @@ export function createDeliveryService(
       throw new PlanningInputError(
         'Delivery contains invalid allocation hours. Correct the stored record before planning.',
       );
-    const capacityStatuses = calculateCapacityStatuses(
+    const capacityStatuses = calculatePlanCapacity(
       snapshots,
       planningMonths,
       allAllocations,
     );
-    for (const key of latestCapacityEdits.keys())
-      if (!capacityStatuses.get(key)?.overAllocated)
-        latestCapacityEdits.delete(key);
+    const latestCapacityEdits = new Map<
+      string,
+      { projectId: string; breakdownItemId: string; assignmentName?: string }
+    >();
+    const edited = [...allAllocations]
+      .filter((item) => item.hours > 0 && item.editSequence !== undefined)
+      .sort(
+        (left, right) =>
+          left.editSequence! - right.editSequence! ||
+          left.id.localeCompare(right.id),
+      );
+    const projects = await repository.listProjects();
+    const projectItems = new Map(
+      await Promise.all(
+        projects.map(
+          async (project) =>
+            [
+              project.id,
+              await repository.listBreakdownItems(project.id),
+            ] as const,
+        ),
+      ),
+    );
+    for (const allocation of edited) {
+      const key = capacityKey(allocation.employeeId, allocation.month);
+      if (capacityStatuses.get(key)?.overAllocated) {
+        const project = projects.find(
+          (item) => item.id === allocation.projectId,
+        );
+        const item = projectItems
+          .get(allocation.projectId)
+          ?.find((item) => item.id === allocation.breakdownItemId);
+        latestCapacityEdits.set(key, {
+          projectId: allocation.projectId,
+          breakdownItemId: allocation.breakdownItemId,
+          assignmentName: `${project?.name ?? allocation.projectId} / ${item?.name ?? allocation.breakdownItemId}`,
+        });
+      }
+    }
     return {
       projectId,
       items,
@@ -154,11 +188,7 @@ export function createDeliveryService(
     peopleStatus: () =>
       peopleProvider.getStatus?.() ?? 'Planning people provider.',
     currentCapacityStatuses: () =>
-      calculateCapacityStatuses(
-        people ?? [],
-        planningMonths,
-        capacityAllocations,
-      ),
+      calculatePlanCapacity(people ?? [], planningMonths, capacityAllocations),
     retryPeople: async () => {
       people = undefined;
       return readPeople();
@@ -242,10 +272,7 @@ export function createDeliveryService(
           hours,
         });
       }
-      const key = capacityKey(employeeId, month);
-      if (hours > 0)
-        latestCapacityEdits.set(key, { projectId, breakdownItemId: leafId });
-      else latestCapacityEdits.delete(key);
+      publishDeliveryAllocationsChanged({ employeeId });
       return loadProject(projectId);
     },
   };

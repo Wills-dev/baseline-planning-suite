@@ -96,6 +96,27 @@ export function StaffingGrid({
         {planningMonths[0]}–{planningMonths.at(-1)}). Unit:{' '}
         {unit === 'Percent' ? '% capacity' : unit}.
       </p>
+      {[...capacityStatuses.values()]
+        .filter((status) => status.overAllocated)
+        .map((status) => {
+          const latest = latestCapacityEdits.get(
+            capacityKey(status.employeeId, status.month),
+          );
+          return (
+            <p
+              key={capacityKey(status.employeeId, status.month)}
+              className="delivery-capacity-description"
+              role="status"
+            >
+              {people.find((person) => person.employeeId === status.employeeId)
+                ?.name ?? status.employeeId}
+              , {status.month}: over capacity across all projects.
+              {latest
+                ? ` Latest contributing assignment: ${latest.assignmentName}. Edit saved, not blocked.`
+                : ' Historical edit order unavailable for existing allocations.'}
+            </p>
+          );
+        })}
       {people.length === 0 ? (
         <p>No planning people are available.</p>
       ) : (
